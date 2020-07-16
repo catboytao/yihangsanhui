@@ -1,0 +1,868 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+--PBOC Crawler
+--by Dolores
+--2018/11/16
+"""
+import datetime
+import os
+import pyodbc
+import pandas as pd
+from win32com import client as wc
+
+from Utils.WebHandler import crawling
+from Utils.ParseHandler import Read_Html,Read_docx,Read_Excel,Common
+from PBOC_configure import Configure
+
+# ##========数据存储准备工作=========
+Common = Common()
+print("========获取上次更新时间=========")
+conn = pyodbc.connect(
+            'DRIVER={DRIVER};SERVER={SERVER};DATABASE={DATABASE};UID={USER};PWD={PWD}'.format(
+                DRIVER="SQL Server",
+                SERVER="xxxx",
+                DATABASE="xxx",
+                USER="xxx",
+                PWD="xxx"))
+cur = conn.cursor()
+SQL = """SELECT [Latest_update_time] FROM [dbo].[WeeklyUpdate_tracker]
+        WHERE ID = (SELECT MAX(ID) FROM [dbo].[WeeklyUpdate_tracker]
+        WHERE [Organization] = 'PBOC')"""
+print(SQL)
+cur.execute(SQL)
+latestd_time = int(cur.fetchall()[0][0])
+conn.close()
+#
+crawling_date = datetime.datetime.now()
+crawling_date_1 = crawling_date+datetime.timedelta(days=-1)
+print(crawling_date_1.month)
+if len(str(crawling_date_1.month)) == 1:
+    month = '0' + str(crawling_date_1.month)
+else:
+    month = str(crawling_date_1.month)
+if len(str(crawling_date_1.day)) == 1:
+    day ='0' + str(crawling_date_1.day)
+else:
+    day =str(crawling_date_1.day)
+crawling_date =str(crawling_date_1.year) +r"-"+ month +r"-"+ day
+print(crawling_date)
+path = os.path.split((os.path.realpath(__file__)))[0]
+download_path = path + "\\PBOC_data"
+date_floder = download_path +"\\"+crawling_date
+tobecheckdir1 =  os.path.isdir(date_floder)
+if tobecheckdir1 == False:
+    os.makedirs(date_floder)
+download_floder = date_floder + "\\" +crawling_date + '_download'
+tobecheckdir_2 =  os.path.isdir(download_floder)
+if tobecheckdir_2 == False:
+    os.makedirs(download_floder)
+html_floder = date_floder + "\\" +crawling_date + '_html'
+tobecheckdir_3 =  os.path.isdir(html_floder)
+if tobecheckdir_3 == False:
+    os.makedirs(html_floder)
+datapath = date_floder +"\\"+crawling_date+"_Data.xls"
+datawriter = pd.ExcelWriter(datapath)
+link_path = date_floder +"\\"+crawling_date+"_Link.xls"
+link_Writer = pd.ExcelWriter(link_path)
+#
+print("第一部分：=================================开始爬网页上的数据以及下载文档文件=================================")
+"""
+method_1 网页等待，方式
+label_1 网页等待，标签
+method_2 定位页面表单，方式
+label_2 定位页面表单，标签
+label_3 获取表单元素，标签
+method_4 获取翻页按钮，方式
+method_4 获取翻页元素，标签
+"""
+
+def download_funcation(organization_name):
+    html_path = html_floder +'\\' + organization_name
+    tobecheckdir4 = os.path.isdir(html_path)
+    if tobecheckdir4 == False:
+        os.makedirs(html_path)
+    download_path = download_floder + '\\' + organization_name
+    tobecheckdir5 = os.path.isdir(download_path)
+    if tobecheckdir5 == False:
+        os.makedirs(download_path)
+    return html_path,download_path
+
+def handle_crawling(url,orgnazition_name,**kwargs):
+    next_page = 1
+    update_data = []
+    while next_page == 1:
+        crawler.crawlerhandler(url,kwargs['method_1'],kwargs['label_1'])
+        table_html = crawler.get_link_list(kwargs['method_2'],kwargs['label_2']) #获取到首页表单全部列表
+        coincident_dict, flip_flag = crawler.link_handler(crawling_date,orgnazition_name,url,table_html,latestd_time,kwargs['label_3'])#获取到符合更新时间条件的列表
+        if len(coincident_dict) == 0:
+            return "====此次无更新===="
+            break
+        else:
+            coincident_list = list(coincident_dict.keys())
+            print(coincident_dict)
+            update_data.extend(coincident_list)
+            html_path, download_path = download_funcation(orgnazition_name)
+            crawler.download_handler(coincident_dict,html_path, download_path)
+            """将翻页的功能注释掉了，没有实现，并且展示没必要"""
+            # if flip_flag == 1:
+            #     print("====需要翻页====")
+            #     crawler.has_next_page(kwargs['method_4'],kwargs['label_4'])
+            return "====此次更新"+str(len(update_data))+"条===="
+
+crawler = crawling()
+print("数据采集一：总行")
+center_bank = r"http://www.pbc.gov.cn/zhengwugongkai/127924/128041/2161421/index.html"
+center_bank_result = handle_crawling(r"http://www.pbc.gov.cn/zhengwugongkai/127924/128041/2161421/index.html"
+                                    ,'总行'
+                                    ,method_1 = 'By.ID'
+                                    ,label_1 = 'zwgk_rlist'
+                                    ,method_2 = 'By.XPATH'
+                                    ,label_2 = '//table[@opentype="page"]/tbody/tr[2]/td'
+                                    ,method_3 = 'By.CSS_SELECTOR'
+                                    ,label_3 = 'table'
+                                    ,label_4 = 'td.hei12jj'
+                                    ,label_5 = 'td.hei12jj>a')
+print("此次总行：" + center_bank_result)
+# #
+# print("数据采集二：北京营管部管理中心")
+# beijing_bank_result = handle_crawling(r"http://beijing.pbc.gov.cn/beijing/132030/132052/132059/index.html"
+#                                     ,'北京营管部管理中心'
+#                                     ,method_1 = 'By.ID'
+#                                     ,label_1 = 'content_right'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class=" portlet"]/tbody/tr/td/table[4]/tbody'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,label_4 = 'td.hei12jj'
+#                                     ,label_5 = 'td.hei12jj>a')
+# print("此次北京营管部管理中心：" + beijing_bank_result)
+#
+# print("数据采集三：成都分行")
+# chengdu_bank_result = handle_crawling(r"http://chengdu.pbc.gov.cn/chengdu/129320/129341/129350/index.html"
+#                                     ,'成都分行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,label_4 = 'td.hei12jj'
+#                                     ,label_5 = 'td.hei14jj>p>a'
+#                                       )
+# print("此次成都分行：" + chengdu_bank_result)
+#
+# print("数据采集四：大连中心支行")
+# dalian_bank_result = handle_crawling(r"http://dalian.pbc.gov.cn/dalian/123812/123830/123837/index.html"
+#                                     ,'大连中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,label_4 = 'td.hei12jj'
+#                                     ,label_5 = 'td.hei14jj'
+#                                       )
+# print("此次大连中心支行：" + dalian_bank_result)
+#
+# print("数据采集五：福州中心支行")
+# fuzhou_bank_result = handle_crawling(r"http://fuzhou.pbc.gov.cn/fuzhou/126805/126823/126830/index.html"
+#                                     ,'福州中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次福州中心支行：" + fuzhou_bank_result)
+#
+# print("数据采集六：广州分行")
+# guangzhou_bank_result = handle_crawling(r"http://guangzhou.pbc.gov.cn/guangzhou/129142/129159/129166/index.html"
+#                                     ,'广州分行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次广州分行：" + guangzhou_bank_result)
+#
+# print("数据采集七：贵阳中心支行")
+# guiyang_bank_result = handle_crawling(r"http://guiyang.pbc.gov.cn/guiyang/113288/113306/113313/index.html"
+#                                     ,'贵阳中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.XPATH'
+#                                     ,label_4 = '//table[@opentype="page"]/tbody/tr[2]/td/table/tbody/tr/td/div/span'
+#                                       )
+# print("此次贵阳中心支行：" + guiyang_bank_result)
+#
+# print("数据采集八：哈尔滨中心支行")
+# haerbing_bank_result = handle_crawling(r"http://haerbin.pbc.gov.cn/haerbin/112693/112776/112783/index.html"
+#                                     ,'哈尔滨中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次哈尔滨中心支行：" + haerbing_bank_result)
+#
+# print("数据采集九：海口中心支行")
+# haikou_bank_result = handle_crawling(r"http://haikou.pbc.gov.cn/haikou/132982/133000/133007/index.html"
+#                                     ,'海口中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class=" portlet"]/tbody/tr/td/table[4]'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次海口中心支行：" + haikou_bank_result)
+#
+# print("数据采集十：杭州中心支行")
+# hangzhou_bank_result = handle_crawling(r"http://hangzhou.pbc.gov.cn/hangzhou/125268/125286/125293/index.html"
+#                                     ,'杭州中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次杭州中心支行：" + hangzhou_bank_result)
+#
+# print("数据采集十一：合肥中心支行")
+# hefei_bank_result = handle_crawling(r"http://hefei.pbc.gov.cn/hefei/122364/122382/122389/index.html"
+#                                     ,'合肥中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次合肥中心支行：" + hefei_bank_result)
+#
+# print("数据采集十二：呼和浩特中心支行")
+# huhehaote_bank_result = handle_crawling(r"http://huhehaote.pbc.gov.cn/huhehaote/129797/129815/129822/index.html"
+#                                     ,'呼和浩特中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td/table/tbody'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次呼和浩特中心支行：" + huhehaote_bank_result)
+#
+# print("数据采集十三：济南分行")
+# jinan_bank_result = handle_crawling(r"http://jinan.pbc.gov.cn/jinan/120967/120985/120994/index.html"
+#                                     ,'济南分行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.XPATH'
+#                                     ,label_4 = '//table[@class="border1 portlet"]/tbody/tr/td/div[-1]'
+#                                       )
+# print("此次济南分行：" + jinan_bank_result)
+
+# print("数据采集十四：昆明中心支行")
+# kunming_bank_result = handle_crawling(r"http://kunming.pbc.gov.cn/kunming/133736/133760/133767/index.html"
+#                                     ,'昆明中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td/table/tbody'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次昆明中心支行：" + kunming_bank_result)
+#
+# print("数据采集十五：拉萨中心支行")
+# lasa_bank_result = handle_crawling(r"http://lasa.pbc.gov.cn/lasa/120480/120504/120511/index.html"
+#                                     ,'拉萨中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次拉萨中心支行：" + lasa_bank_result)
+#
+# print("数据采集十六：兰州中心支行")
+# lanzhou_bank_result = handle_crawling(r"http://lanzhou.pbc.gov.cn/lanzhou/117067/117091/117098/index.html"
+#                                     ,'兰州中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次兰州中心支行：" + lanzhou_bank_result)
+#
+# print("数据采集十七：南昌中心支行")
+# nanchang_bank_result = handle_crawling(r"http://nanchang.pbc.gov.cn/nanchang/132372/132390/132397/index.html"
+#                                     ,'南昌中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border2 portlet"]/tbody/tr/td/table[4]/tbody'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次南昌中心支行：" + nanchang_bank_result)
+#
+# print("数据采集十八：南京分行")
+# nanjing_bank_result = handle_crawling(r"http://nanjing.pbc.gov.cn/nanjing/117542/117560/117567/index.html"
+#                                     ,'南京分行'
+#                                       , method_1='By.CLASS_NAME'
+#                                       ,label_1 = 'content_right.column'
+#                                       ,method_2 = 'By.XPATH'
+#                                       ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                       ,method_3 = 'By.CSS_SELECTOR'
+#                                       ,label_3 = 'table'
+#                                       ,method_4 = 'By.XPATH'
+#                                       ,label_4 = '//table[@opentype="page"]/tbody/tr[2]/td'
+#                                       )
+# print("此次南京分行：" + nanjing_bank_result)
+#
+# print("数据采集十九：南宁分行")
+# nanning_bank_result = handle_crawling(r"http://nanning.pbc.gov.cn/nanning/133346/133364/133371/index.html"
+#                                     ,'南宁分行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@class="zwgk1 portlet"]/tbody/tr/td/table[4]/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次南宁分行：" + nanning_bank_result)
+#
+# print("数据采集二十：宁波中心支行")
+# ningbo_bank_result = handle_crawling(r"http://ningbo.pbc.gov.cn/ningbo/127076/127098/127105/index.html"
+#                                     ,'宁波中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td/table/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次宁波中心支行：" + ningbo_bank_result)
+# #
+# print("数据采集二十一：青岛中心支行")
+# qingdao_bank_result = handle_crawling(r"http://qingdao.pbc.gov.cn/qingdao/126166/126184/126191/index.html"
+#                                     ,'青岛中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次青岛中心支行：" + qingdao_bank_result)
+#
+# print("数据采集二十二：厦门市中心支行")
+# xiamen_bank_result = handle_crawling(r"http://xiamen.pbc.gov.cn/xiamen/127703/127721/127728/index.html"
+#                                     ,'厦门市中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td/table/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次厦门市中心支行：" + xiamen_bank_result)
+#
+# print("数据采集二十三：上海总部")
+# shanghai_bank_result = handle_crawling(r"http://shanghai.pbc.gov.cn/fzhshanghai/113577/114832/114918/index.html"
+#                                     ,'上海总部'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@class=" portlet"]/tbody/tr/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次上海总部：" + shanghai_bank_result)
+#
+# print("数据采集二十四：深圳中心支行")
+# shenzhen_bank_result = handle_crawling(r"http://shenzhen.pbc.gov.cn/shenzhen/122811/122833/122840/index.html"
+#                                     ,'深圳中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次深圳中心支行：" + shenzhen_bank_result)
+# #
+# print("数据采集二十五：沈阳分行")
+# shengyang_bank_result = handle_crawling(r"http://shenyang.pbc.gov.cn/shenyfh/108074/108127/108208/index.html"
+#                                     ,'沈阳分行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@class=" portlet"]/tbody/tr[1]/td/table[4]/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次沈阳分行：" + shengyang_bank_result)
+#
+# print("数据采集二十六：石家庄中心支行")
+# shijiazhuang_bank_result = handle_crawling(r"http://shijiazhuang.pbc.gov.cn/shijiazhuang/131442/131463/131472/index.html"
+#                                     ,'石家庄中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td/table/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次石家庄中心支行：" + shijiazhuang_bank_result)
+#
+# print("数据采集二十七：太原中心支行")
+# taiyuan_bank_result = handle_crawling(r"http://taiyuan.pbc.gov.cn/taiyuan/133960/133981/133988/index.html"
+#                                     ,'太原中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td/table/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次太原中心支行：" + taiyuan_bank_result)
+#
+# print("数据采集二十八：天津分行")
+# tianjing_bank_result = handle_crawling(r"http://tianjin.pbc.gov.cn/fzhtianjin/113682/113700/113707/index.html"
+#                                     ,'天津分行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td/ul'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.XPATH'
+#                                   ,label_4 = '//table[@opentype="page"]/tbody/tr[2]/td/div'
+#                                       )
+# print("此次天津分行：" + tianjing_bank_result)
+#
+# print("数据采集二十九：乌鲁木齐中心支行")
+# wulumuqi_bank_result = handle_crawling(r"http://wulumuqi.pbc.gov.cn/wulumuqi/121755/121777/121784/index.html"
+#                                     ,'乌鲁木齐中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr[1]/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次乌鲁木齐中心支行：" + wulumuqi_bank_result)
+#
+# print("数据采集三十：武汉分行")
+# wuhan_bank_result = handle_crawling(r"http://wuhan.pbc.gov.cn/wuhan/123472/123493/123502/index.html"
+#                                     ,'武汉分行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.XPATH'
+#                                   ,label_4 = '//table[@class="border1 portlet"]/tbody/tr/td/div[-1]/table'
+#                                       )
+# print("此次武汉分行：" + wuhan_bank_result)
+#
+# print("数据采集三十一：西安分行")
+# xian_bank_result = handle_crawling(r"http://xian.pbc.gov.cn/xian/129428/129449/129458/index.html"
+#                                     ,'西安分行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td/table/tbody'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次西安分行：" + xian_bank_result)
+#
+# print("数据采集三十二：西宁中心支行")
+# xining_bank_result = handle_crawling(r"http://xining.pbc.gov.cn/xining/118239/118263/118270/index.html"
+#                                     ,'西宁中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次西宁中心支行：" + xining_bank_result)
+#
+# print("数据采集三十三：银川中心支行")
+# yinchuan_bank_result = handle_crawling(r"http://yinchuan.pbc.gov.cn/yinchuan/119983/120001/120008/index.html"
+#                                     ,'银川中心支行'
+#                                   ,method_1 = 'By.CLASS_NAME'
+#                                   ,label_1 = 'content_right.column'
+#                                   ,method_2 = 'By.XPATH'
+#                                   ,label_2 = '//table[@opentype="page"]/tbody/tr/td'
+#                                   ,method_3 = 'By.CSS_SELECTOR'
+#                                   ,label_3 = 'table'
+#                                   ,method_4 = 'By.CSS_SELECTOR'
+#                                   ,label_4 = 'table.fenye'
+#                                       )
+# print("此次银川中心支行：" + yinchuan_bank_result)
+#
+# print("数据采集三十四：长春中心支行")
+# changchun_bank_result = handle_crawling(r"http://changchun.pbc.gov.cn/changchun/124680/124698/124705/index.html"
+#                                     ,'长春中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'border1.portlet'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次长春中心支行：" + changchun_bank_result)
+#
+# print("数据采集三十五：长沙中心支行")
+# changsha_bank_result = handle_crawling(r"http://changsha.pbc.gov.cn/changsha/130011/130029/130036/index.html"
+#                                     ,'长沙中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="zwgk1 portlet"]/tbody/tr/td/table[4]'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次长沙中心支行：" + changsha_bank_result)
+#
+# print("数据采集三十六：郑州中心支行")
+# zhengzhou_bank_result = handle_crawling(r"http://zhengzhou.pbc.gov.cn/zhengzhou/124182/124200/124207/index.html"
+#                                     ,'郑州中心支行'
+#                                     ,method_1 = 'By.CLASS_NAME'
+#                                     ,label_1 = 'content_right.column'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//table[@class="border1 portlet"]/tbody/tr/td'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = 'table.fenye'
+#                                       )
+# print("此次郑州中心支行：" + zhengzhou_bank_result)
+#
+# print("数据采集三十七：重庆营业管理部")
+# zhengzhou_bank_result = handle_crawling(r"http://chongqing.pbc.gov.cn/chongqing/107680/107897/107909/index.html"
+#                                     ,'重庆营业管理部'
+#                                     ,method_1 = 'By.ID'
+#                                     ,label_1 = 'zwgk_rlist'
+#                                     ,method_2 = 'By.XPATH'
+#                                     ,label_2 = '//div[@id="zwgk_rlist"]/div[@class="portlet"]/div[2]'
+#                                     ,method_3 = 'By.CSS_SELECTOR'
+#                                     ,label_3 = 'table'
+#                                     ,method_4 = 'By.CSS_SELECTOR'
+#                                     ,label_4 = '//div[@id="zwgk_rlist"]/div[@class="portlet"]/div[2]/div/table'
+#                                       )
+# print("此次重庆营业管理部：" + zhengzhou_bank_result)
+# Configure.url_df.to_excel(link_Writer,sheet_name='link',index=False)
+# link_Writer.save()
+# link_Writer.close()
+
+
+
+# print("第二部分：=================================删除空的文件夹，转换文件类型=================================")
+# def decide_docx_pdf(files,path1):
+#     for i in files:
+#         if r".doc" in i or r'.pdf' in i:
+#             tobecheckdir5 = os.path.isdir(path1)
+#             if tobecheckdir5 == True:
+#                 break
+#             else:
+#                 os.makedirs(path1)
+#                 break
+# dl_files = os.listdir(download_floder)
+# html_files = os.listdir(html_floder)
+# for i in dl_files:
+#     if len(os.listdir(download_floder+"\\"+i)) == 0:
+#         os.removedirs(download_floder+"\\"+i)
+# for j in html_files:
+#     if len(os.listdir(html_floder+"\\"+j)) == 0:
+#         os.removedirs(html_floder+"\\"+j)
+# crawling_doc_pdf_floder = date_floder + "\\" + crawling_date + "_PDF_DOCX"
+# tobecheckdir4 = os.path.isdir(crawling_doc_pdf_floder)
+# if tobecheckdir4 == False:
+#     os.makedirs(crawling_doc_pdf_floder)
+# new_dl_files = os.listdir(download_floder)
+# for filename in new_dl_files:
+#     print("正在解析的机构："+filename)
+#     files = os.listdir(download_floder+"\\"+filename)
+#     pdf_docx_path = crawling_doc_pdf_floder + "\\"+filename
+#     decide_docx_pdf(files,pdf_docx_path)
+#     for filename1 in files:
+#         path = download_floder+"\\"+filename
+#         portion = os.path.splitext(filename1)
+#         if portion[1] == '.et':
+#             newname = portion[0]+'.xls'
+#             if os.path.exists(path+"\\"+newname)==True:
+#                 continue
+#             else:
+#                 os.chdir(path)
+#                 os.rename(filename1,newname)
+#         if portion[1] =='.wps':
+#             newname = portion[0]+'.doc'
+#             tobecheckdir5 = os.path.exists(path+"\\"+newname)
+#             if tobecheckdir5 == True:
+#                 continue
+#             else:
+#                 os.chdir(path)
+#                 os.rename(filename1,newname)
+#         else:
+#             continue
+#     for doc_pdf_filename in files:
+#         portion1 = os.path.splitext(doc_pdf_filename)
+#         if portion1[1] == ".doc" or portion1[1]=='.pdf':
+#             if os.path.exists(pdf_docx_path+"\\"+ portion1[0] +r".docx")==True:
+#                 continue
+#             else:
+#                 word = wc.DispatchEx('Word.Application')
+#                 doc = word.Documents.Open(download_floder+"\\"+filename+"\\"+doc_pdf_filename)
+#                 doc.SaveAs(pdf_docx_path+"\\"+ portion1[0] +r".docx",12)
+#                 doc.Close()
+#                 word.Quit()
+#         else:
+#             continue
+
+# print("第三部分：=================================解析下载好的文件=========================================")
+# Read_table = Read_Excel()
+# Read_docx = Read_docx()
+# Read_Html = Read_Html()
+# Configure = Configure()
+# crawling_doc_pdf_floder = date_floder + "\\" + crawling_date + "_PDF_DOCX"
+# html_files = os.listdir(html_floder)
+# dl_files1 = os.listdir(download_floder)
+# dl_files2 = os.listdir(crawling_doc_pdf_floder)
+# print("======开始解析HTML部分数据======")
+# for filename1 in html_files:
+#     print("正在解析的机构：" + filename1)
+#     if filename1 == "总行":
+#         Read_Html.read_centerbank(html_floder + "\\" + filename1)
+#     elif filename1 == "北京营管部管理中心":
+#         Read_Html.read_beijing(html_floder + "\\" + filename1)
+#     elif filename1 == "大连中心支行":
+#         Read_Html.read_dalian(html_floder + "\\" + filename1)
+#     elif filename1 == "昆明中心支行":
+#         Read_Html.read_kunming(html_floder + "\\" + filename1)
+#     elif filename1 == "南昌中心支行":
+#         Read_Html.read_nanchang(html_floder + "\\" + filename1)
+#     elif filename1 == "南京分行":
+#         Read_Html.read_nanjing(html_floder + "\\" + filename1)
+#     else:
+#         print("有新的机构包含HTML格式数据")
+#
+# print("======开始解析初始下载文件======")
+# for filename2 in dl_files1:
+#     print("正在解析的机构："+filename2)
+#     for filename3 in os.listdir(download_floder +"\\"+filename2):
+#         portion2 = os.path.splitext(filename3)
+#         province = Common.get_province(filename2)
+#         url, pubulish_date = Common.mapping_url_date(filename2,filename3)
+#         data_list = [crawling_date,url,pubulish_date,province,filename2]
+#         if portion2[1] == ".xls" or portion2[1] == ".xlsx":
+#             if filename2 == "西安分行":
+#                 Read_table.Read_case2(data_list,download_floder,filename2,filename3)
+#             else:
+#                 Read_table.Read_case1(data_list,download_floder,filename2,filename3)
+#         if portion2[1] == '.docx':
+#             docx_path = download_floder +"\\"+filename2+"\\"+filename3
+#             Read_docx.docx_case1(docx_path,data_list)
+#         else:
+#             continue
+#
+# print("======开始解析转换文件======")
+# for filename3 in dl_files2:
+#     print("正在解析的机构："+filename3)
+#     if filename3 == "乌鲁木齐中心支行":
+#         print(filename3 + "--此机构需要人工处理--")
+#     for filename4 in os.listdir(crawling_doc_pdf_floder + "\\" + filename3):
+#         portion2 = os.path.splitext(filename4)
+#         province = Common.get_province(filename3)
+#         mapping_filename = filename4.split(".")[0]
+#         url,pubulish_date = Common.mapping_url_date(filename3,mapping_filename)
+#         data_list = [crawling_date,url,pubulish_date,province,filename3]
+#         docx_path = crawling_doc_pdf_floder +"\\"+filename3+"\\"+filename4
+#         F_docx_data_index = Read_docx.docx_case1(docx_path,data_list)
+#
+# Configure.F_excel_data_DF.to_excel(datawriter,sheet_name='Excel_Data',index=False)
+# Configure.F_docx_data_DF.to_excel(datawriter,sheet_name='Word_Data',index=False)
+# Configure.web_DataDF.to_excel(datawriter,sheet_name='html_data',index=False)
+# datawriter.save()
+# datawriter.close()
+# print("======解析数据完成，请见检查数据======")
+
+# print("第四部分：=================================清洗、处理、合并数据=========================================")
+# keywords_list = [r'中国人民银行清算',r'中国印钞造币',r'中国支付清算',r'上海黄金交易所',r'银行间',r'梧桐树',r'财务通',r'支付宝',r'网银在线',r'天翼电子',
+# r'快钱支付',r'平安付',r'百付宝',r'联动优势',r'中移电子',r'银联商务',r'通联支付',r'易宝支付',r'恒通支付',r'汇付数据',r'网易宝',r'盛付通',r'易智付',r'美的支付',r'银盛支付',
+# r'拉卡拉',r'瑞银信',r'迅付信息',r'连连银通',r'联通支付',r'瀚银信息',r'宝付网络',r'汇元银通',r'杉德支付',r'智付电子',r'新生信息',r'快付通',r'汇潮支付',r'唯品会',
+# r'东方电子',r'付费通',r'国付宝',r'易联支付',r'捷付睿通']
+# All_data_path = date_floder +"\\"+crawling_date+"_All_Data.xlsx"
+# Data_Writer_1 = pd.ExcelWriter(All_data_path)
+# All_data_DF = pd.DataFrame(columns=['采集批次','URL','公示表日期','省份','分支机构','序号','被处罚人','行政处罚决定书文号','违法行为类型','行政处罚决定','行政处罚机关','行政处罚日期','备注'])
+# excel_sheet= pd.ExcelFile(datapath)
+# sheet_list = excel_sheet.sheet_names
+# for i in sheet_list:
+#     sheet_DF = pd.read_excel(datapath,sheet_name=i)
+#     All_data_DF = All_data_DF.append(sheet_DF,ignore_index=True)
+# All_data_DF['是否为网联清算公司'] = None
+# All_data_DF['ID'] = None
+# ID = 1
+# for index in All_data_DF.index:
+#     All_data_DF.loc[index,['ID']] = ID
+#     ID += 1
+#     All_data_DF.loc[index,['是否为网联清算公司']] = "否"
+#     name = All_data_DF.loc[index,['被处罚人']].values[0]
+#     new_name = str(name).replace('\n','').replace(' ','').replace(' ','')
+#     All_data_DF.loc[index, ['被处罚人']] = new_name
+#     pubulish_date = str(All_data_DF.loc[index,['公示表日期']].values[0])
+#     penalty_date = str(All_data_DF.loc[index,['行政处罚日期']].values[0])
+#     penalty_date_change = Common.clean_date(penalty_date,pubulish_date)
+#     All_data_DF.loc[index,['行政处罚日期']] = penalty_date_change
+#     for i in keywords_list:
+#         if i in str(new_name):
+#             All_data_DF.loc[index,['是否为网联清算公司']] = "是"
+# All_data_DF.to_excel(Data_Writer_1,sheet_name='all_Data',index=False)
+# Data_Writer_1.save()
+# Data_Writer_1.close()
+#
+print("第五部分：=================================数据写进数据库=========================================")
+conn = pyodbc.connect(
+            'DRIVER={DRIVER};SERVER={SERVER};DATABASE={DATABASE};UID={USER};PWD={PWD}'.format(
+                DRIVER="SQL Server",
+                SERVER="CNGDCFASQL01",
+                DATABASE="Penalty_Data_PBOC_CBRC_CSRC_CIRC",
+                USER="yhshsanction3",
+                PWD="information!26"))
+cur = conn.cursor()
+print("成功连接数据库！")
+
+#在数据库中 IF OBJECT_ID("TABLE_NAME") IS NOT NULL 是判断数据库中某表是否存在
+cur.execute("""
+IF OBJECT_ID('PBOC_RAW', 'U') IS NOT NULL
+    DROP TABLE [PBOC_RAW]
+CREATE TABLE [dbo].[PBOC_RAW](
+    [ID]  INT IDENTITY(1,1) NOT NULL,
+	[采集批次] [nvarchar](255) NULL,
+    [URL] [nvarchar](255) NULL,
+	[省份] [nvarchar](255) NULL,
+    [分支机构] [nvarchar](255) NULL,
+	[公示表日期] [DATETIME]NULL,
+	[序号] [nvarchar](255) NULL,
+    [被处罚人] [nvarchar](255) NULL,
+	[行政处罚决定书文号] [nvarchar](255) NULL,
+	[违法行为类型] [nvarchar](MAX) NULL,
+	[行政处罚决定] [nvarchar](MAX) NULL,
+	[行政处罚机关] [nvarchar](255) NULL,
+	[行政处罚日期] [nvarchar](255) NULL,
+    [备注] [NVARCHAR](255) NULL,
+    [是否为网联清算公司] [NVARCHAR](255) NULL,
+) ON [PRIMARY]
+""")
+print("成功创建数据存储表！")
+conn.commit()
+
+All_data_path = date_floder +"\\"+crawling_date+"_All_Data.xlsx"
+True_DF = pd.read_excel(All_data_path,sheetname='all_Data')
+PBOC_DF = True_DF.fillna(' ')
+for index in PBOC_DF.index:
+    Data_list = list(PBOC_DF.loc[index])
+    SQL = "INSERT INTO [PBOC_RAW] ([采集批次]\
+      ,[URL]\
+      ,[公示表日期]\
+      ,[省份]\
+      ,[分支机构]\
+      ,[序号]\
+      ,[被处罚人]\
+      ,[行政处罚决定书文号]\
+      ,[违法行为类型]\
+      ,[行政处罚决定]\
+      ,[行政处罚机关]\
+      ,[行政处罚日期]\
+      ,[备注]\
+      ,[是否为网联清算公司]) VALUES ('" + Data_list[0] +"','"+ Data_list[1] +"','"+ Data_list[2] +"',N'"+ Data_list[3] +"',N'"+ Data_list[4] +"',N'"+ str(Data_list[5]) +"',N'"+ Data_list[6] +"',N'"+Data_list[7] +"',N'"+ Data_list[8] +"',N'"+ Data_list[9] +"',N'"+ Data_list[10] +"',N'"+ Data_list[11] +"',N'"+ Data_list[12] +"',N'"+ Data_list[13]  +"')"
+    print(SQL)
+    cur.execute(SQL)
+    conn.commit()
+cur.execute("EXEC PBOC")
+conn.commit()
+cur.execute("EXEC PBOC_weeklyupdate")
+conn.commit()
+# conn.close()
+print("数据清洗完毕！")
+#
+update_time = int(''.join(crawling_date.split('-')))
+SQL = """INSERT INTO [WeeklyUpdate_tracker]([Organization] ,[Latest_update_time] ) VALUES(?,?)"""
+cur.execute(SQL,tuple(['PBOC',update_time]))
+conn.commit()
+print("更新Tracker完成！")

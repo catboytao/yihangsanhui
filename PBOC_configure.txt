@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import pandas as pd
+class Configure(object):
+    F_excel_data_DF = pd.DataFrame(columns=['采集批次','URL','公示表日期','省份','分支机构','序号','被处罚人','行政处罚决定书文号','违法行为类型','行政处罚决定','行政处罚机关','行政处罚日期','备注'])
+    F_excel_data_index = 1
+    F_docx_data_DF = pd.DataFrame(columns=['采集批次','URL','公示表日期','省份','分支机构','序号','被处罚人','行政处罚决定书文号','违法行为类型','行政处罚决定','行政处罚机关','行政处罚日期','备注'])
+    F_docx_data_index = 1
+    web_DataDF = pd.DataFrame(columns=['采集批次', 'URL', '公示表日期', '省份', '分支机构', '序号', '被处罚人', '行政处罚决定书文号', '违法行为类型', '行政处罚决定', '行政处罚机关', '行政处罚日期','备注'])
+    web_Dataindex = 1
+    url_df = pd.DataFrame(columns=['采集日期', '分支机构', 'Link','发布时间'])
+    url_index = 1

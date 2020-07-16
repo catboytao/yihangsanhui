@@ -1,0 +1,605 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+--CBRC Crawler
+--by Dolores
+--2017/09/11
+"""
+import re
+
+import pyodbc
+import datetime
+import requests
+import time
+from bs4 import BeautifulSoup
+from selenium.webdriver import Firefox
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as expected, expected_conditions
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+headers = {
+'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3',
+'Accept-Language': 'zh-CN,zh;q=0.9',
+####每次都要去更新一下Cookie
+'Cookie': '__jsluid=f79193cae881515eebd09f2c78c71c1d; __jsl_clearance=1557799394.39|0|35Qq2ki75RqAEBnIz4WXKyQk2xA%3D',
+'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.131 Safari/537.36',
+#'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36'
+}
+options = Options()
+profile = FirefoxProfile()
+profile.set_preference("network.proxy.type", 1)
+profile.set_preference("network.proxy.http", "xxxx")
+profile.set_preference("network.proxy.http_port", 'xxx')
+profile.set_preference("network.proxy.ssl", "xxxxx")###为https准备的配置
+profile.set_preference("network.proxy.ssl_port", 'xxx')
+profile.set_preference("network.proxy.socks_username", "azhuo")
+#options.headless = True
+driver = Firefox(firefox_options=options,
+               firefox_profile = profile,executable_path=r'geckodriver.exe')
+wait = WebDriverWait(driver,30)
+#
+#     "http://www.cbrc.gov.cn/chinese/home/docViewPage/110002.html",
+#    "http://www.cbrc.gov.cn/zhuanti/xzcf/get2and3LevelXZCFDocListDividePage//1.html",
+#    "http://www.cbrc.gov.cn/zhuanti/xzcf/get2and3LevelXZCFDocListDividePage//2.html"
+conn = pyodbc.connect(
+            'DRIVER={DRIVER};SERVER={SERVER};DATABASE={DATABASE};UID={USER};PWD={PWD}'.format(
+                DRIVER="SQL Server",
+                SERVER="xxx",
+                DATABASE="xxx",
+                USER="xxx",
+                PWD="xxx"))
+cur = conn.cursor()
+
+print("成功连接数据库！")
+
+SQL = """SELECT [Latest_update_time] FROM [WeeklyUpdate_tracker]
+        WHERE ID = (SELECT MAX(ID) FROM [WeeklyUpdate_tracker]
+        WHERE [Organization] = 'CBRC')"""
+cur.execute(SQL)
+latest_updatetime = int(cur.fetchall()[0][0])
+print(latest_updatetime)
+caijipici_time = datetime.datetime.now()
+caijipici_time = caijipici_time
+if len(str(caijipici_time.month))==1:
+    month = '0'+str(caijipici_time.month)
+else:
+    month = str(caijipici_time.month)
+if len(str(caijipici_time.day))==1:
+    day = '0'+str(caijipici_time.day)
+else:
+    day =  str(caijipici_time.day)
+caijipici = str(caijipici_time.year) + r"-" + month + r"-" + day
+
+cur.execute("""
+IF OBJECT_ID('CBRC_RAW', 'U') IS NOT NULL
+    DROP TABLE [CBRC_RAW]
+CREATE TABLE [dbo].[CBRC_RAW](
+   [采集批次] [nvarchar](255) NULL,
+   [序号] [int] IDENTITY(1,1) NOT NULL,
+   [来源机构级别] [nvarchar](255) NULL,
+   [URL] [nvarchar](255) NULL,
+   [发布时间/文章来源] [nvarchar](255) NULL,
+   [公开表标题] [nvarchar](255) NULL,
+   [公开表副标题] [nvarchar](255) NULL,
+   [行政处罚决定书文号] [nvarchar](255) NULL,
+   [个人-姓名] [nvarchar](255) NULL,
+   [个人-所在单位] [nvarchar](255) NULL,
+   [单位-名称] [nvarchar](255) NULL,
+   [单位-法定代表人（主要负责人）姓名] [nvarchar](255) NULL,
+   [主要违法违规事实(案由)] [nvarchar](max) NULL,
+   [行政处罚依据] [nvarchar](max) NULL,
+   [行政处罚决定] [nvarchar](max) NULL,
+   [作出处罚决定机关名称] [nvarchar](255) NULL,
+   [作出处罚决定日期] [nvarchar](255) NULL,
+   [是否为网联清算公司] [NVARCHAR](255) NULL,
+) ON [PRIMARY]
+""")
+print("成功创建数据采集表！")
+conn.commit()
+print("数据采集中...... 请等待！")
+print("第一步：爬取下网页中规整的数据，放入CBRC_ROW中")
+
+proxies = {'http': 'http://10.173.23.139:3128', 'https': 'http://10.173.23.139:3128'}
+#先通过整页的List去获取所有的URL List
+def getPageURLList(url, headers):
+    pageURLList = []
+    flag = 0
+    driver.get(url)
+    driver.refresh()
+    time.sleep(3)
+    #html = driver.find_element(By.CSS_SELECTOR, 'body').get_attribute('innerHTML')
+    #html = requests.get(url,headers= headers,proxies = proxies).text
+    html = driver.page_source.encode('utf-8')
+    soup = BeautifulSoup(html, "lxml")
+    title_time = soup.find('div',class_='caidan-right-div').find('div',class_='row').find("div", class_="ng-scope").find_all("div",class_="panel-row ng-scope")
+    localTime = time.localtime()
+    strTime = time.strftime("%Y%m%d", localTime)
+    for tr in title_time:
+        time1 = tr.find_all("span")[-1].get_text()
+        time1 = time1.replace("\r", "").replace("\n", "").replace("\t", "")
+        # 判断时间:
+        t1 = time1.split("-")
+        t11 = int(t1[0] + t1[1] + t1[2])
+        # -----------【每次跑数据请修改t22】-----------------------------------------------
+        con = tr.find_all("span")[0]
+        if t11 > latest_updatetime and t11 <= int(strTime):
+            if r"公开表" in con.get_text():
+                link = "http://www.cbirc.gov.cn/cn/view/pages/"+con.find("a")['href']
+                pageURLList.append(link)
+        else:
+            flag = int(1)
+            break
+    return flag,pageURLList
+
+# # 数据规则
+def paraseSinglePageP0(url, headers):
+    # 采集数据当天的时间来作为采集批次
+    # CBRC_dict = {'0':'','1':'','2':'','3':'','4':'','5':'','6':'','7':'','8':'','9':'','10':'','11':'','12':'','13':'','14':'','15':''}
+
+    CBRC_dict = {0: caijipici}
+    driver.get(url)
+    time.sleep(5)
+    html = driver.find_element(By.CSS_SELECTOR, 'body').get_attribute('innerHTML')
+    #html = requests.get(url,headers= headers,proxies = proxies).text
+    soup = BeautifulSoup(html, 'html.parser')
+    # laiyuanjigou = soup.find("div", class_="phot_pre font_12f").find_all("a")[-1].get_text()
+    # if r"银监" in laiyuanjigou:
+    #     laiyuanjigou = laiyuanjigou.replace(r"行政处罚", "")
+    #     CBRC_dict[1] = laiyuanjigou
+    # else:
+    #     CBRC_dict[1] = "银监会机关"
+    #laiyuanjigou = soup.find("",class_="tfont-caption").get_text().replace(r"行政处罚","")
+    #table = driver.find_element(By.CSS_SELECTOR,'table.MsoNormalTable')
+    #laiyuanjigou = table.find_elements(By.CSS_SELECTOR,'td')[0].text.split('>')[-1]
+    laiyuanjigou = driver.find_elements(By.CSS_SELECTOR,'div.breadcrumb > ul > li')[-1].text
+    CBRC_dict[1] = laiyuanjigou
+    CBRC_dict[2] = url
+    #time = soup.find("div", id="docTitle", align="center").get_text()
+    #time = table.find_element(By.XPATH,'//tr[2]/td/table//tr[1]').text
+    #time = re.match(r'.*?(\d{4}-\d{2}-\d{2}).*?',text).group(1)
+    date = driver.find_element(By.CSS_SELECTOR,'div.pages-date>span.ng-binding').text
+    source = driver.find_element(By.CSS_SELECTOR,'div.pages-date>span.pages-date-laiyuan').text
+    source = str(source).replace('来源','文章来源')
+    CBRC_dict[3] = str(date) + ' ' + str(source)
+    CBRC_dict[4] = ''
+    CBRC_dict[5] = ''
+
+    try:
+        try:
+            for w in range(0, 3):
+                if r"公开表" in soup.find("div", class_="Section0").find_all("p", class_='MsoNormal')[w].get_text():
+                    tittle = soup.find("div", class_="Section0").find_all("p", class_='MsoNormal')[w].get_text()
+                    CBRC_dict[4] = tittle
+                    CBRC_dict[5] = soup.find("div", class_="Section0").find_all("p", class_='MsoNormal')[
+                        w + 1].get_text()
+        except:
+            try:
+                for ww in range(0, 3):
+                    if r"公开表" in soup.find("div", class_="Section0").find_all("p", class_='p0')[ww].get_text():
+                        tittle = soup.find("div", class_="Section0").find_all("p", class_='p0')[ww].get_text()
+                        CBRC_dict[4] = tittle
+                        CBRC_dict[5] = soup.find("div", class_="Section0").find_all("p", class_='p0')[ww + 1].get_text()
+            except:
+                for a in range(0, 4):
+                    if r"公开表" in soup.find("div", class_="Section1").find_all("p", class_='MsoNormal')[a].get_text():
+                        tittle = soup.find("div", class_="Section1").find_all("p", class_='MsoNormal')[a].get_text()
+                        CBRC_dict[4] = tittle
+                        CBRC_dict[5] = soup.find("div", class_="Section1").find_all("p", class_='MsoNormal')[
+                            a + 1].get_text()
+
+    except:
+        try:
+            for m in range(0, 3):
+                if r"公开表" in soup.find("div", class_="WordSection1").find_all("p")[m].get_text():
+                    tittle = soup.find("div", class_="WordSection1").find_all("p")[m].get_text()
+                    CBRC_dict[4] = tittle
+                    CBRC_dict[5] = soup.find("div", class_="WordSection1").find_all("p")[m + 1].get_text()
+        except:
+            try:
+                for m in range(0, 3):
+                    if r"公开表" in soup.find("div", class_="WordSection1").find_all("p", class_='MsoNormal')[m].get_text():
+                        tittle = soup.find("div", class_="WordSection1").find_all("p", class_='MsoNormal')[m].get_text()
+                        CBRC_dict[4] = tittle
+                        CBRC_dict[5] = soup.find("div", class_="WordSection1").find_all("p", class_='MsoNormal')[
+                            m + 1].get_text()
+            except:
+                pass
+    table_soup = ""
+    try:
+        table_soup = soup.find("table", class_="MsoNormalTable").find_all("tr")
+        tr_length = len(table_soup)
+    except:
+        try:
+            table_soup = soup.find("div", class_="Section0").find("table").find_all("tr")
+            tr_length = len(table_soup)
+        except:
+            try:
+                table_soup = soup.find("table", class_="MsoTableGrid").find_all("tr")
+                tr_length = len(table_soup)
+            except Exception as e:
+                tr_length = 0
+                print(e)
+    if tr_length > 10:
+        CBRC_dict[4] = table_soup[0].find_all("td")[-1].get_text()
+        CBRC_dict[5] = table_soup[1].find_all("td")[-1].get_text()
+        CBRC_dict[6] = table_soup[3].find_all("td")[-1].get_text()
+        CBRC_dict[7] = table_soup[4].find_all("td")[-1].get_text()
+        CBRC_dict[8] = ""
+        i = 9
+        for p1 in range(5, 12):
+            try:
+                CBRC_dict[i] = table_soup[p1].find_all("td")[-1].get_text()
+            except:
+                CBRC_dict[i] = " "
+            i += 1
+    else:
+        i = 6
+        if tr_length == 10:
+            for p1 in table_soup:
+                CBRC_dict[i] = p1.find_all("td")[-1].get_text()
+                i += 1
+        elif tr_length == 9:
+            CBRC_dict[6] = table_soup[0].find_all("td")[-1].get_text()
+            CBRC_dict[7] = table_soup[1].find_all("td")[-1].get_text()
+            CBRC_dict[8] = ""
+            CBRC_dict[9] = table_soup[2].find_all("td")[-1].get_text()
+            i = 10
+            for p2 in range(3, 9):
+                CBRC_dict[i] = table_soup[p2].find_all("td")[-1].get_text()
+                i += 1
+        else:
+            if tr_length == 7:
+                CBRC_dict[6] = table_soup[0].find_all("td")[-1].get_text()
+                CBRC_dict[7] = table_soup[1].find_all("td")[-1].get_text()
+                CBRC_dict[8] = ""
+                CBRC_dict[9] = ""
+                CBRC_dict[10] = ""
+                i = 11
+                for p3 in range(2, 7):
+                    CBRC_dict[i] = table_soup[p3].find_all("td")[-1].get_text()
+                    i += 1
+            else:
+                if tr_length == 8:
+                    try:
+                        CBRC_dict[6] = table_soup[0].find_all("td")[-1].get_text()
+                        print(table_soup[0].find_all("td")[-1].get_text())
+                        CBRC_dict[7] = table_soup[1].find_all("td")[-1].get_text()
+                        CBRC_dict[8] = table_soup[2].find_all("td")[-1].get_text()
+                        CBRC_dict[9] = ""
+                        CBRC_dict[10] = ""
+                        i = 11
+                        for p3 in range(3, 8):
+                            CBRC_dict[i] = table_soup[p3].find_all("td")[-1].get_text()
+                            i += 1
+                    except:
+                        CBRC_dict[6] = table_soup[0].find_all("td")[-1].get_text()
+                        CBRC_dict[7] = table_soup[1].find_all("td")[-1].get_text()
+                        CBRC_dict[8] = ""
+                        CBRC_dict[9] = ""
+                        i = 10
+                        for p3 in range(2, 8):
+                            CBRC_dict[i] = table_soup[p3].find_all("td")[-1].get_text()
+                            i += 1
+                else:
+                    CBRC_dict[6] = table_soup[0].find_all("td")[-1].get_text()
+                    CBRC_dict[7] = ""
+                    CBRC_dict[8] = ""
+                    i = 9
+                    try:
+                        for p3 in range(1, 8):
+                            print(table_soup[p3])
+                            CBRC_dict[i] = table_soup[p3].find_all("td")[-1].get_text()
+                            i += 1
+                    except:
+                        return CBRC_dict
+    return CBRC_dict
+
+
+def buildListLine(CBRC_dict):
+    lineList = []
+    try:
+        for o in CBRC_dict:
+            CBRC_dict[o] = CBRC_dict[o].strip()
+            CBRC_dict[o] = CBRC_dict[o].replace("\n", "")
+            lineList.append(CBRC_dict[o])
+    except Exception:
+        print("【Build Line List Error】：" + CBRC_dict[0])
+    return lineList
+
+
+def qingsuan_judge(name):
+    panduan_result = "否"
+    keywords_list = ['中国人民银行清算', '中国印钞造币', '中国支付清算', '上海黄金交易所', '银行间', '梧桐树', '财务通', '支付宝', '网银在线', '天翼电子',
+                     '快钱支付', '平安付', '百付宝', '联动优势', '中移电子', '银联商务', '通联支付', '易宝支付', '恒通支付', '汇付数据', '网易宝', '盛付通', '易智付',
+                     '美的支付', '银盛支付',
+                     '拉卡拉', '瑞银信', '迅付信息', '连连银通', '联通支付', '瀚银信息', '宝付网络', '汇元银通', '杉德支付', '智付电子', '新生信息', '快付通',
+                     '汇潮支付', '唯品会',
+                     '东方电子', '付费通', '国付宝', '易联支付', '捷付睿通', ]
+    for f in keywords_list:
+        if f in name:
+            panduan_result = '是'
+    return panduan_result
+
+
+def get_page_list(k):
+    page_list1 = []
+    # html = requests.get(k,headers= headers, proxies = proxies).text
+    # print
+    print(k)
+    driver.get(k)
+    time.sleep(5)
+    #wait.until(expected.visibility_of_element_located((By.CSS_SELECTOR, 'div.center_2')))
+    #html = driver.find_element(By.CSS_SELECTOR, 'body').get_attribute('innerHTML')
+    html = driver.page_source.encode('utf-8')
+    soup = BeautifulSoup(html, "lxml")
+    # pagecount = soup.find("table", class_="table-fixed").find_all("tr")[-1].get_text()
+    #
+    # pagecount = pagecount.split("/")[1]
+    # pagecount = pagecount.split(r"首页")[0]
+    pagecount = 19
+    for count in range(1, int(pagecount)+1):
+        url0 = k+'#'+str(count)
+        page_list1.append(url0)
+        # 银监会机关的url规则不一样
+        # if "110002" in k:
+        #     url0 = "http://www.cbrc.gov.cn/chinese/home/docViewPage/110002" + r"&current=" + str(count)
+        #     page_list1.append(url0)
+        #     count += 1
+        # else:
+        #     url0 = k + "?current=" + str(count)
+        #     page_list1.append(url0)
+        #     count += 1
+    return page_list1
+
+# page_list1_1 = get_page_list("http://www.cbirc.gov.cn/cn/list/9103/910305/ybjhcf/1.html")
+# page_list1_2 = get_page_list("http://www.cbirc.gov.cn/cn/list/9103/910305/ybjjcf/1.html")
+# page_list1_3 = get_page_list("http://www.cbirc.gov.cn/cn/list/9103/910305/ybjfjcf/1.html")
+
+page_list1_1 = get_page_list("http://www.cbirc.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=4113&itemUrl=ItemListRightList.html&itemName=%E9%93%B6%E4%BF%9D%E7%9B%91%E4%BC%9A%E6%9C%BA%E5%85%B3&itemsubPId=931&itemsubPName=%E8%A1%8C%E6%94%BF%E5%A4%84%E7%BD%9A")
+page_list1_2 = get_page_list("http://www.cbirc.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=4114&itemUrl=ItemListRightList.html&itemName=%E9%93%B6%E4%BF%9D%E7%9B%91%E5%B1%80%E6%9C%AC%E7%BA%A7&itemsubPId=931&itemsubPName=%E8%A1%8C%E6%94%BF%E5%A4%84%E7%BD%9A")
+page_list1_3 = get_page_list("http://www.cbirc.gov.cn/cn/view/pages/ItemList.html?itemPId=923&itemId=4115&itemUrl=ItemListRightList.html&itemName=%E9%93%B6%E4%BF%9D%E7%9B%91%E5%88%86%E5%B1%80%E6%9C%AC%E7%BA%A7&itemsubPId=931&itemsubPName=%E8%A1%8C%E6%94%BF%E5%A4%84%E7%BD%9A")
+
+page_list2 = []
+for w in page_list1_1:
+    flag, pageURLList = getPageURLList(w, headers)
+    print("page_list1_1下更新数为：",str(len(pageURLList)))
+    page_list2.extend(pageURLList)
+    if flag == int(1):
+        break
+
+print(page_list1_2)
+for m in page_list1_2:
+    flag, pageURLList = getPageURLList(m, headers)
+    print("page_list1_2下更新数为：", str(len(pageURLList)))
+    page_list2.extend(pageURLList)
+    if flag == int(1):
+        break
+for k in page_list1_3:
+    flag, pageURLList = getPageURLList(k, headers)
+    print("page_list1_3下更新数为：", str(len(pageURLList)))
+    page_list2.extend(pageURLList)
+    if flag == int(1):
+        break
+
+print("总共的二级页面数量：" + str(len(page_list2)))
+#print(page_list2)
+picture_path = []
+kk = int(1)
+panduan_result = ""
+for i, p in enumerate(page_list2):
+
+    print("正在解析的页面：" + p)
+    driver.get(p)
+    html = driver.find_element(By.CSS_SELECTOR, 'body').get_attribute('innerHTML')
+    # html = requests.get(p,headers= headers, proxies = proxies).text
+    soup = BeautifulSoup(html, 'html.parser')
+    CBRC_dict = paraseSinglePageP0(p, headers)
+
+    if len(CBRC_dict) < 10:
+        kk += 1
+        continue
+    else:
+
+        print(kk,CBRC_dict)
+        print(len(CBRC_dict))
+        line = buildListLine(CBRC_dict)
+        newcelllist = []
+        for cell in line:
+            cell = cell.strip()
+            cell = cell.replace("\n", "")
+            cell = cell.replace("\t", "")
+            newcelllist.append(cell)
+        try:
+            sql = "INSERT INTO [CBRC_RAW]([采集批次]) VALUES(N'" + newcelllist[0] + "')"
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [来源机构级别] = N'" + newcelllist[1] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [URL] = N'" + newcelllist[2] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [发布时间/文章来源] = N'" + newcelllist[3] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [公开表标题] = N'" + newcelllist[4] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [公开表副标题] = N'" + newcelllist[5] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [行政处罚决定书文号] = N'" + newcelllist[6] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [个人-姓名]= N'" + newcelllist[7] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [个人-所在单位]= N'" + newcelllist[8] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [单位-名称]= N'" + newcelllist[9] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [单位-法定代表人（主要负责人）姓名]= N'" + newcelllist[10] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [主要违法违规事实(案由)]= N'" + newcelllist[11] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [行政处罚依据]= N'" + newcelllist[12] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            sql = "UPDATE [CBRC_RAW]  SET [行政处罚决定]= N'" + newcelllist[13] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            try:
+                sql = "UPDATE [CBRC_RAW]  SET [作出处罚决定机关名称]= N'" + newcelllist[14] + "' WHERE [序号] = " + str(kk)
+                cur.execute(sql)
+            except:
+                kk += 1
+                continue
+            sql = "UPDATE [CBRC_RAW]  SET [作出处罚决定日期]= N'" + newcelllist[15] + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            conn.commit()
+            ####网联结算公司
+            sql = "SELECT [单位-名称] FROM [CBRC_RAW] WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            t_result = cur.fetchall()
+            content = []
+            if len(t_result) != 0:
+                for j in t_result:
+                    r_result = list(j)
+                    r_result = str(r_result)
+                    r_result = r_result.replace(r"[", "")
+                    r_result = r_result.replace(r"]", "")
+                    content.append(r_result)
+            else:
+                r_result = ""
+                content.append(r_result)
+            name_content = "".join(content)
+            panduan_result = qingsuan_judge(name_content)
+            sql = "UPDATE [dbo].[CBRC_RAW] SET [是否为网联清算公司]= N'" + panduan_result + "' WHERE [序号] = " + str(kk)
+            cur.execute(sql)
+            conn.commit()
+            kk += 1
+        except:
+            kk += 1
+            continue
+    # except:
+    #     print("跳过的网页："+p)
+    #     continue
+    # src = soup.find("div",class_="Section1").find_all("p",class_="MsoNormal")[0].find("img")['src']
+    # u = r"http://www.cbrc.gov.cn/" + src
+    # picture_path.append(u)
+print("第一步完成")
+
+print("第二步：判断是否存在图片的数据")
+if len(picture_path)!=0:
+    print("人工需要处理数据为图片")
+    for nn in picture_path:
+        print(nn)
+    print("人工处理这些图片，整理放在表格中，然后运行第三部分代码")
+else:
+    print("没有需要人工处理的图片")
+
+print("第三部：将人工整理好的表格数据写入CBRC_RAW中")
+sql = "SELECT COUNT([序号]) FROM [Penalty_Data_PBOC_CBRC_CSRC_CIRC].[dbo].[CBRC_RAW]"
+cur.execute(sql)
+t_result = cur.fetchall()
+for j in t_result:
+    r_result = list(j)
+kk1 = int(r_result[0])
+
+# ####将图片人工或是使用ABBYY来转换为在表格里面数据
+# excel_path = r"C:\Users\shirlrwang\Desktop\Deloitte\TASKS\一行三会\CBRC_Data.xlsx"
+# workbook1=xlrd.open_workbook(excel_path)
+# table1=workbook1.sheet_by_index(0)
+# row1 = table1.nrows
+# for f in range(row1):
+#     value1 =table1.cell_value(f,0)
+#     sql = "INSERT INTO [CBRC_RAW]([采集批次]) VALUES(N'" + value1 + "')"
+#     cur.execute(sql)
+#     value2 = table1.cell_value(f,1)
+#     sql = "UPDATE [CBRC_RAW]  SET [来源机构级别] = N'" + value2 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value3 = table1.cell_value(f,2)
+#     sql = "UPDATE [CBRC_RAW]  SET [URL] = N'" + value3 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value4 = table1.cell_value(f,3)
+#     sql = "UPDATE [CBRC_RAW]  SET [发布时间/文章来源] = N'" + value4 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value5 = table1.cell_value(f,4)
+#     sql = "UPDATE [CBRC_RAW]  SET [公开表标题] = N'" + value5 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value6 = table1.cell_value(f,5)
+#     sql = "UPDATE [CBRC_RAW]  SET [公开表副标题] = N'" + value6 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value7 = table1.cell_value(f,6)
+#     sql = "UPDATE [CBRC_RAW]  SET [行政处罚决定书文号] = N'" + value7 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value8 = table1.cell_value(f,7)
+#     sql = "UPDATE [CBRC_RAW]  SET [个人-姓名] = N'" + value8 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value9 = table1.cell_value(f,8)
+#     sql = "UPDATE [CBRC_RAW]  SET [主要违法违规事实（案由）] = N'" + value9 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value10 = table1.cell_value(f,9)
+#     sql = "UPDATE [CBRC_RAW]  SET [行政处罚依据] = N'" + value10 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value11 = table1.cell_value(f,10)
+#     sql = "UPDATE [CBRC_RAW]  SET [行政处罚决定] = N'" + value11 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value12 = table1.cell_value(f,11)
+#     sql = "UPDATE [CBRC_RAW]  SET [作出处罚决定机关名称] = N'" + value12 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     value13 = table1.cell_value(f,12)
+#     sql = "UPDATE [CBRC_RAW]  SET [作出处罚决定日期] = N'" + value13 + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     panduan_result = qingsuan_judge(value8)
+#     sql = "UPDATE [dbo].[CBRC_RAW] SET [是否为网联清算公司]= N'" + panduan_result + "' WHERE [序号] = " + str(kk1)
+#     cur.execute(sql)
+#     conn.commit()
+#     kk1 += 1
+# print("第三步：图片数据写入数据库完毕")
+
+print("第四步：在数据库中清洗数据")
+cur.execute("EXEC DBO.CBRC")  # 执行清洗操作
+conn.commit()
+print("数据清洗结束！")
+
+cur.execute("EXEC DBO.CBRC_WeeklyUpdate")  # 执行清洗操作
+conn.commit()
+
+update_time = int(''.join(caijipici.split('-')))
+SQL = """INSERT INTO [WeeklyUpdate_tracker]([Organization] ,[Latest_update_time] ) VALUES(?,?)"""
+cur.execute(SQL,tuple(['CBRC',update_time]))
+conn.commit()
+print("更新Tracker完成！")
+
+#将此次采集好的数据合并到CBRC_SUM
+# print("第五步：将本次采集好的数据合并到CBRC_SUM中")
+# sql_2 = "INSERT INTO [Penalty_Data_PBOC_CBRC_CSRC_CIRC].[dbo].[P_CBRC_SUM]\
+# ( [数据批次]\
+#       ,[来源机构级别]\
+#       ,[URL]\
+#       ,[发布时间]\
+#       ,[行政处罚决定书文号]\
+#       ,[个人-姓名]\
+#       ,[个人-所在单位]\
+#       ,[单位-名称]\
+#       ,[单位-法定代表人（主要负责人）姓名]\
+#       ,[Inst_Revised]\
+#       ,[FinInst]\
+#       ,[Tier]\
+#       ,[主要违法违规事实（案由）]\
+#       ,[行政处罚依据]\
+#       ,[行政处罚决定]\
+#       ,[罚款金额（万元）]\
+#       ,[行政处罚决定类型]\
+#       ,[是否与反洗钱相关]\
+#       ,[反洗钱类别]\
+#       ,[客户身份识别（CIP）]\
+#       ,[可疑交易报告（STR）]\
+#       ,[记录保存（RK）]\
+#       ,[内控制度（IC）]\
+#       ,[持续监控（TM）]\
+#       ,[作出处罚决定机关名称]\
+#       ,[City（作出处罚决定机关所在城市）]\
+#       ,[Province（作出处罚决定机关所在省份）]\
+#       ,[作出处罚决定日期]\
+#       ,[Year（作出处罚决定年份）])\
+# SELECT [数据批次],[来源机构级别],[URL],[发布时间],[行政处罚决定书文号],[个人-姓名],[个人-所在单位],[单位-名称],[单位-法定代表人（主要负责人）姓名]\
+#       ,[Inst_Revised],[FinInst],[Tier],[主要违法违规事实（案由）],[行政处罚依据],[行政处罚决定],[罚款金额（万元）],[行政处罚决定类型],[是否与反洗钱相关],[反洗钱类别]\
+#       ,[客户身份识别（CIP）],[可疑交易报告（STR）],[记录保存（RK）],[内控制度（IC）],[持续监控（TM）],[作出处罚决定机关名称],[City（作出处罚决定机关所在城市）],[Province（作出处罚决定机关所在省份）]\
+#       ,[作出处罚决定日期],[Year（作出处罚决定年份）] FROM [dbo].[CBRC_Clean]"
+# cur.execute(sql_2)
+# conn.commit()
+conn.close()

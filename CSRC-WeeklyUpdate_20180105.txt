@@ -1,0 +1,169 @@
+#名称：CSRC Crawler
+#功能：CSRC 行政处罚数据采集
+# by Hugo
+# 2017/09/12
+# -*- coding: utf-8 -*-
+#***************************
+import requests
+from bs4 import BeautifulSoup
+import re
+import pyodbc
+import datetime
+
+rawurl = 'http://www.csrc.gov.cn/pub/zjhpublic/3300/3313/index_7401' #定义最原始的网页【前缀】
+
+#获取数据库链接 ,使用pymssql.connect()方法
+connection = pyodbc.connect(
+            'DRIVER={DRIVER};SERVER={SERVER};DATABASE={DATABASE};UID={USER};PWD={PWD}'.format(
+                DRIVER="SQL Server",
+                SERVER="xxxx",
+                DATABASE="xxx",
+                USER="xxxxx",
+                PWD="xxxxx"))
+Acquisition_time = (datetime.datetime.now().strftime("%Y-%m-%d"))  #此次采集时间
+# print(Acquisition_time)
+
+print("成功链接数据库")
+
+cursor = connection.cursor()
+cursor.execute('''
+IF OBJECT_ID('CSRC_RAW','U') IS NOT NULL
+    DROP TABLE [CSRC_RAW]
+
+CREATE TABLE [dbo].[CSRC_RAW](
+	[序号] [int] IDENTITY(1,1),
+	[数据采集日期] [nvarchar](255) NULL,
+	[URL] [nvarchar](max) NULL,
+	[发文日期] [nvarchar](255) NULL,
+	[发布机构] [nvarchar](255) NULL,
+	[标题] [nvarchar](max) NULL,
+	[文号] [nvarchar](max) NULL,
+	[正文] [nvarchar](max) NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+''')
+
+cursor.execute("SELECT [文号]+[标题]FROM [IM_CSRC_RAW_SUM] ")  #创建之前采集过的数据 list 用来避免采集重复
+List = cursor.fetchall()
+# print(len(List))
+L = [] #创建已经采集的 文号+标题 LIST
+for i in List:
+    L.append(i[0])  # 元组TUPLE 转换为LIST
+# print(len(L))
+# print(L)
+
+print("开始采集数据")
+headers = {
+    'host' : 'www.csrc.gov.cn',
+    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36",
+    'Connection': "Keep-Alive",
+    'Upgrade-Insecure-Requests':'1'
+}
+proxies = {'http': 'http://10.173.23.139:3128', 'https': 'http://10.173.23.139:3128'}
+#每个月采集不会超过 6 页去寻找更新
+for PageNum in ['', '_1', '_2'	, '_3'	, '_4'	, '_5']:#	, '_6', '_7'	, '_8'	, '_9'	, '_10'	, '_11'	, '_12'	, '_13'	, '_14'	, '_15'	, '_16'	, '_17'	, '_18'	, '_19'	, '_20'	, '_21'	, '_22'	, '_23'	, '_24'	, '_25'	, '_26'	, '_27'	, '_28'	, '_29'	, '_30'	, '_31'	, '_32'	, '_33'	, '_34'	, '_35'	, '_36'	, '_37'	, '_38'	, '_39'	, '_40'	, '_41'	, '_42'	, '_43'	, '_44'	, '_45'	, '_46'	, '_47'	, '_48'	, '_49'	, '_50'	, '_51']:
+
+    #  #可以查看原网页需要采集到第几页 （ _3 代表 第4页）
+    print("遍历网页：第 "+PageNum+"+1 页")
+    print("http://www.csrc.gov.cn/pub/zjhpublic/3300/3313/index_7401" + PageNum + ".htm")
+    resp = requests.get("http://www.csrc.gov.cn/pub/zjhpublic/3300/3313/index_7401"+PageNum+".htm",headers = headers,proxies=proxies)
+    #resp = requests.get("http://www.csrc.gov.cn/pub/zjhpublic/3300/3313/index_7401"+PageNum+".htm",headers = headers)
+
+    resp.encoding = 'utf-8'
+    resp = resp.text
+    soup = BeautifulSoup(resp, "html.parser")
+    List_Row = soup.find_all('div', attrs={'class': 'row'})
+    # print(List_Row)
+    for row in List_Row:
+        # print(row)
+
+        PublishDate_temp = row.find('li', attrs={'class': 'fbrq'})  # 【发布日期】
+        DocumentNo_temp = row.find('li', attrs={'class': 'wh'})     # 【文书号】
+
+        PublishDate = PublishDate_temp.get_text()  # 得到【发布日期】
+        DocumentNo = DocumentNo_temp.get_text()  # 得到【文书号】
+
+        Content_url_temp = row.find("a", href=re.compile(r"^\.\./\.\./"))  #识别正文链接
+        Content_title = Content_url_temp.get_text()  # 得到【正文标题】
+        # print(Content_title)
+
+        temp = DocumentNo+Content_title
+        # print(temp)
+
+        if temp in L:  #如果已经在之前发布过了，则跳出此次循环
+            # 【1.此处隐藏BUG, 如果数据是从中间插入（插入在上一次之前），那么采集不到】
+            continue
+        print(temp)
+
+        Content_url = "http://www.csrc.gov.cn/pub/zjhpublic/" + Content_url_temp["href"][6:]  # 得到【正文连接】
+        print(Content_url)
+        # Content_url_resp = request.urlopen(Content_url).read().decode("utf-8")
+        Content_url_resp = requests.get(Content_url,headers = headers, proxies=proxies)
+        #Content_url_resp = requests.get(Content_url,headers = headers)
+
+        Content_url_resp.encoding = 'utf-8'
+        Content_url_resp = Content_url_resp.text
+        Content_url_soup = BeautifulSoup(Content_url_resp, "html.parser")
+
+        List_HeadInfo = Content_url_soup.find("div", {"class": "headInfo"}).findAll("td", {"colspan": "2"})
+        # print(List_HeadInfo)
+        for HeadInfo in List_HeadInfo:
+            HeadInfo_title = HeadInfo.find('b')  # 【HeadInfo_title】  #虽然这里会有两个<b>标签，但通过观察得到 发布机构会出现在第一个。所以直接取第一个
+
+            Release_mechanism_temp = HeadInfo.find('span')
+            if HeadInfo_title.get_text() == u"发布机构:":
+                Release_mechanism = Release_mechanism_temp.get_text()  # 得到【发布机构】
+                # print(Release_mechanism)
+                break
+
+###########【获取正文】###################################################################
+
+        dr = re.compile(r'<[^>]+>', re.S)  #定义 正则表达式
+        Content_temp = dr.sub('', str(Content_url_soup)) #去掉所有标签
+
+        Content_temp = Content_temp.replace('【字体：大 中 小】', '**********')
+        Content_temp = Content_temp.replace('--**/', '**********')
+        #定义用于切片的分隔符
+
+        Content_temp = Content_temp[::-1] #将 字符串 倒序
+
+        Content_temp_List = Content_temp.split("**********")
+        Content = Content_temp_List[1][::-1]  #取 第2个 切片，并倒序
+
+        if '-->' in Content:  # 针对于情况二：仍然需要继续分隔
+            Content = Content.replace('-->', '**********')
+            Content = Content[::-1]
+            Content_temp_List = Content.split("**********")
+            Content = Content_temp_List[0][::-1]
+
+######################################################################################
+        SQL = "insert into [CSRC_RAW]([URL],[发文日期],[发布机构],[标题],[文号],[正文],[数据采集日期]) VALUES(N'"+Content_url+"',N'"+ PublishDate+"',N'"+ Release_mechanism+"',N'"+ Content_title+"',N'"+ DocumentNo+"',N'"+ Content+"',N'"+ Acquisition_time+"')"
+        cursor.execute(SQL)
+        connection.commit()
+
+connection.commit()
+print("数据采集结束")
+
+cursor.execute("EXEC DBO.CSRC")  #执行数提取操作【存储过程：DBO.CSRC】
+connection.commit()
+
+cursor.execute("SELECT COUNT(*) FROM [dbo].[CSRC_RAW]")  #执行提取操作
+count = cursor.fetchall()
+connection.commit()
+print("此次共采集 "+str(count[0][0])+" 条数据")
+print("-----------------------------")
+print("数据清洗结束")
+
+print("-----------------------------")
+cursor.execute("EXEC SumData_CSRC")  #执行数提取操作【存储过程：DBO.SumData_CSRC】
+connection.commit()
+print("数据汇总结束")
+
+print("-----------------------------")
+cursor.execute("EXEC DBO.CSRC_WeeklyUpdate")  # 执行清洗操作
+connection.commit()
+print("获得CSRC WeeklyUpdate Data")
+
+print("-----------------------------")
+connection.close()  #关闭数据库连接。
+print("关闭数据库")
+

@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os
+import docx
+import xlrd
+import datetime
+import time
+import xlutils3
+from xlutils3 import copy
+from datetime import date
+import pandas as pd
+from bs4 import BeautifulSoup
+
+from PBOC_configure import Configure
+
+configure = Configure()
+crawling_date = datetime.datetime.now()
+crawling_date_1 = crawling_date + datetime.timedelta(days=-1)
+if len(str(crawling_date_1.month)) == 1:
+    month = '0' + str(crawling_date_1.month)
+else:
+    month = str(crawling_date_1.month)
+if len(str(crawling_date_1.day)) == 1:
+    day ='0' + str(crawling_date_1.day)
+else:
+    day =str(crawling_date_1.day)
+crawling_date =str(crawling_date_1.year) +r"-"+ month +r"-"+ day
+path = os.path.split((os.path.realpath(__file__)))[0]
+path = "\\".join(path.split('\\')[0:-1])
+
+class Common(object):
+
+    def mapping_url_date(self,filename1,filename2):
+        pubulish_date = ""
+        Excel_URL_DF = pd.read_excel(path + '\\PBOC_data' + '\\' + crawling_date + '\\' + crawling_date + '_Link.xls')
+        url = ""
+        for index in Excel_URL_DF.index:
+            organization_name_1 = Excel_URL_DF.loc[index,['分支机构']].values[0]
+            if filename1 == organization_name_1:
+                url_link = Excel_URL_DF.loc[index,['Link']].values[0]
+                if '.html' in url_link:
+                    try:
+                        html_filename = filename2.split('index')[0] + '/index' + filename2.split('index')[1]
+                        if html_filename in url_link:
+                            url = url_link
+                            pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                    except Exception as e:
+                        continue
+                else:
+                    if filename2 in url_link:
+                        url = url_link
+                        pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                    elif filename2.split(r'.')[0] in url_link:
+                        url = url_link
+                        pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                    else:
+                        continue
+        return url,pubulish_date
+
+    def get_province(self,filename):
+        province = ""
+        dict_province = {"长春": "吉林", "成都": "四川", "大连": "辽宁", "福州": "福建", "广州": "广东", "贵阳": "贵州", "哈尔滨": "黑龙江",
+                         "海口": "海南", "杭州": "浙江", "合肥": "安徽", "呼和浩特": "内蒙古", "济南": "山东", "昆明": "云南", "拉萨": "西藏",
+                         "兰州": "甘肃",
+                         "南昌": "江西", "南京": "江苏", "南宁": "广西", "宁波": "浙江", "青岛": "山东", "厦门": "福建", "深圳": "广东", "沈阳": "辽宁",
+                         "石家庄": "河北",
+                         "太原": "山西", "天津": "天津", "乌鲁木齐": "新疆", "武汉": "湖北", "西安": "陕西", "西宁": "青海", "银川": "宁夏",
+                         "长沙": "湖南", "重庆": "重庆", "郑州": "河南",
+                         "上海": "上海", "北京": "北京", "总行": "中国"}
+        for key, value in dict_province.items():
+            if key in filename:
+                province = value
+        return province
+
+    def clean_date(self, penalty_date, pubulish_date):
+        penalty_date_change = ""
+        if r"    " in penalty_date:
+            penalty_date = penalty_date.replace(r"    ", "")
+        if r"　" in penalty_date:
+            penalty_date = penalty_date.replace(r"　", "")
+        if r" " in penalty_date:
+            penalty_date = penalty_date.replace(r" ", "")
+        penalty_date = penalty_date.replace("\n", "")
+        if len(penalty_date) <= 5:
+            penalty_date_change = pubulish_date
+        elif r"201年" in penalty_date:
+            penalty_date_change = "2018年" + penalty_date.split(r"年")[1]
+        elif r"年/" in penalty_date:
+            penalty_date_change = penalty_date.replace(r"/", "")
+        elif len(penalty_date) == 8 and r"." not in penalty_date and r"-" not in penalty_date:
+            penalty_date_change = penalty_date[:3] + "年" + penalty_date[4] + penalty_date[5] + "月" + penalty_date[
+                                                                                                     6:] + "日"
+        else:
+            penalty_date_change = penalty_date
+        return penalty_date_change
+
+class Read_Html(object):
+    """ 解析下载的HTML文件，返回Dataframe"""
+    def web_data_case1(self,tr):
+        data_list = []
+        for i in tr.find_all("td"):
+            text = i.get_text()
+            data_list.append(text)
+        return data_list
+
+    def mapping_url_date(self, filename1, filename2):
+        url = ""
+        pubulish_date = ""
+        Excel_URL_DF = pd.read_excel(path + '\\PBOC_data' + '\\' + crawling_date + '\\' + crawling_date + '_Link.xls')
+        url = ""
+        for index in Excel_URL_DF.index:
+            organization_name_1 = Excel_URL_DF.loc[index, ['分支机构']].values[0]
+            if filename1 == organization_name_1:
+                url_link = Excel_URL_DF.loc[index, ['Link']].values[0]
+                if '.html' in url_link:
+                    html_filename = filename2.split('index')[0] + '/index' + filename2.split('index')[1]
+                    if html_filename in url_link:
+                        url = url_link
+                        pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                else:
+                    if filename2 in url_link:
+                        url = url_link
+                        pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                    elif filename2.split(r'.')[0] in url_link:
+                        url = url_link
+                        pubulish_date = Excel_URL_DF.loc[index, ['发布时间']].values[0]
+                    else:
+                        continue
+        return url, pubulish_date
+
+    def read_centerbank(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            tr_list = soup.find("td", class_="hei14jj").find_all("tr")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for i in tr_list[1:]:
+                if len(i.find_all("td")) == 6:
+                    Zonghang_Data_list = [crawling_date, url, pubulish_date, '北京', '中国人民银行', ' ']
+                    for j in i.find_all("td"):
+                        Zonghang_Data_list.append(j.get_text())
+                    Zonghang_Data_list.append(" ")
+                elif len(i.find_all("td")) == 8:
+                    Zonghang_Data_list = [crawling_date, url, pubulish_date, '北京', '中国人民银行']
+                    Web_Data_list = self.web_data_case1(i)
+                    Zonghang_Data_list.extend(Web_Data_list)
+                else:
+                    print("总行有其他格式")
+                configure.web_DataDF.loc[configure.web_Dataindex] = Zonghang_Data_list
+                configure.web_Dataindex += 1
+
+    def read_beijing(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            Data_table = soup.find("td", class_="hei14jj")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for i in Data_table.find_all('tr')[1:]:
+                Beijing_data_list = [crawling_date, url, pubulish_date, "北京", "北京营业管理部"]
+                if len(i.find_all('td')) == 8:
+                    for j in range(8):
+                        Beijing_data_list.append(i.find_all('td')[j].get_text())
+                    configure.web_DataDF.loc[configure.web_Dataindex] = Beijing_data_list
+                    configure.web_Dataindex += 1
+                elif len(i.find_all('td')) == 2:
+                    configure.web_Dataindex = configure.web_Dataindex - 1
+                    configure.web_DataDF.loc[configure.web_Dataindex, ['违法行为类型']] = str(
+                        configure.web_DataDF.loc[configure.web_Dataindex, ['违法行为类型']].values[0]) + i.find_all('td')[0].get_text()
+                    configure.web_DataDF.loc[configure.web_Dataindex, ['行政处罚决定']] = str(
+                        configure.web_DataDF.loc[configure.web_Dataindex, ['行政处罚决定']].values[0]) + i.find_all('td')[1].get_text()
+                    configure.web_Dataindex = configure.web_Dataindex + 1
+
+    def read_dalian(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            tr_list = soup.find("td",class_ = "hei14jj").find("table").find_all("tr")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for t in range(1,len(tr_list)):
+                td_len = len(tr_list[t].find_all("td"))
+                if  td_len == 8:
+                    Dalian_data_list = [crawling_date,'','',"辽宁","大连中心支行"]
+                    Data_list = self.web_data_case1(tr_list[t])
+                    Dalian_data_list.extend(Data_list)
+                    configure.web_DataDF.loc[configure.web_Dataindex] = Dalian_data_list
+                    configure.web_Dataindex += 1
+                elif td_len == 1 or td_len == 0:
+                    continue
+                elif td_len == 7:
+                    Dalian_data_list = [crawling_date,url, pubulish_date,"辽宁","大连中心支行"]
+                    Data_list = self.web_data_case1(tr_list[t])
+                    Data_list.append(" ")
+                    Dalian_data_list.extend(Data_list)
+                    configure.web_DataDF.loc[configure.web_Dataindex] = Dalian_data_list
+                    configure.web_Dataindex += 1
+                else:
+                    configure.web_Dataindex = configure.web_Dataindex - 1
+                    configure.web_DataDF.loc[configure.web_Dataindex,['违法行为类型']] = str(configure.web_DataDF.loc[configure.web_Dataindex,['违法行为类型']].values[0]) + tr_list[t].find_all('td')[0].get_text()
+                    configure.web_Dataindex = configure.web_Dataindex + 1
+
+    def read_kunming(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            tr_list = soup.find("td",class_= "hei14jj").find_all("tr")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for i in range(1,len(tr_list)):
+                if len(tr_list[i].find_all("td"))>=8:
+                    Kunming_data_list = [crawling_date,url, pubulish_date,"云南","昆明中心支行"]
+                    Data_list = []
+                    for j in tr_list[i].find_all("td")[:7]:
+                        Data_list.append(j.get_text())
+                    Data_list.append(" ")
+                    Kunming_data_list.extend(Data_list)
+                    configure.web_DataDF.loc[configure.web_Dataindex] = Kunming_data_list
+                    configure.web_Dataindex += 1
+
+    def read_nanchang(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            tr_list = soup.find("td",class_ = "hei14jj").find_all("tr")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for i in range(1,len(tr_list)):
+                if len(tr_list[i].find_all("td"))>=8:
+                    Nanchang_data_list = [crawling_date,url, pubulish_date,"湖北","南昌中心支行 "]
+                    Data_list = self.web_data_case1(tr_list[i])
+                    if len(Data_list[0])==0:
+                        continue
+                    else:
+                        Nanchang_data_list.extend(Data_list)
+                        configure.web_DataDF.loc[configure.web_Dataindex] = Nanchang_data_list
+                        configure.web_Dataindex += 1
+                else:
+                    print("南昌中心支行具有其他格式数据")
+
+    def read_nanjing(self, files):
+        filename1 = files.split('\\')[-1]
+        for file in os.listdir(files):
+            html_r = open(files + '\\' +file, 'r', encoding='utf-8')
+            html = html_r.read()
+            soup = BeautifulSoup(html, 'html.parser')
+            time.sleep(5)
+            tr_list = soup.find("td",class_ = "hei14jj").find_all("tr")
+            url, pubulish_date = self.mapping_url_date(filename1, file)
+            for i in range(1,len(tr_list)):
+                td_len = len(tr_list[i].find_all("td"))
+                if td_len >= 8:
+                    Nanjing_data_list = [crawling_date,url, pubulish_date,"江苏","南京分行 "]
+                    Data_list = self.web_data_case1(tr_list[i])
+                    if len(Data_list[0])==0:
+                        continue
+                    else:
+                        Nanjing_data_list.extend(Data_list)
+                        configure.web_DataDF.loc[configure.web_Dataindex] = Nanjing_data_list
+                        configure.web_Dataindex += 1
+
+
+
+
+class Read_Excel(object):
+    """按类型解析下载和转换的excel文件"""
+    def Read_case1(self, other_data_list,download_floder,filename1, filename2):
+        try:
+            workbook1 = xlrd.open_workbook(download_floder + "\\" + filename1 + "\\" + filename2)
+        except xlrd.biffh.XLRDError:
+            print(filename2)
+            print("读取excel错误")
+        Sheet_list = workbook1.sheet_names()
+        for h in Sheet_list:
+            table1 = workbook1.sheet_by_name(h)
+            nrow1 = table1.nrows
+            ncol1 = table1.ncols
+            if nrow1 == 0:
+                continue
+            else:
+                cell_value_1 = table1.cell_value(0, 0)
+                cell_value_2 = table1.cell_value(1, 0)
+                if r"处罚" in cell_value_1 or "附表" in cell_value_1 or "序号" in cell_value_1 or "处罚" in cell_value_2:
+                    data_row = 0
+                    for i in range(nrow1):
+                        if "序号" in str(table1.cell_value(i, 0)).strip():
+                            data_row = i + 1
+                            break
+                    for j in range(data_row, nrow1):
+                        if len(str(table1.cell_value(j, 2))) == 0:
+                            break
+                        else:
+                            data_list = []
+                            data_list.extend(other_data_list)
+                            if ncol1 >= 8:
+                                for c in range(8):
+                                    if table1.cell(j, c).ctype == 3:
+                                        date_value = xlrd.xldate_as_tuple(table1.cell_value(j, c),
+                                                                          workbook1.datemode)
+                                        date_tmp = date(*date_value[:3]).strftime("%Y/%m/%d")
+                                        value1 = date_tmp
+                                    else:
+                                        value1 = table1.cell_value(j, c)
+                                    data_list.append(value1)
+                            elif ncol1 == 7:
+                                for c in range(7):
+                                    if table1.cell(j, c).ctype == 3:
+                                        date_value = xlrd.xldate_as_tuple(table1.cell_value(j, c),
+                                                                          workbook1.datemode)
+                                        date_tmp = date(*date_value[:3]).strftime("%Y/%m/%d")
+                                        value1 = date_tmp
+                                    else:
+                                        value1 = table1.cell_value(j, c)
+                                    data_list.append(value1)
+                                data_list.append(" ")
+                            configure.F_excel_data_DF.loc[configure.F_excel_data_index] = data_list
+                            configure.F_excel_data_index += 1
+
+    def Read_case2(self, other_data_list,download_floder, filename1, filename2):
+        try:
+            workbook1 = xlrd.open_workbook(download_floder + "\\" + filename1 + "\\" + filename2)
+        except xlrd.biffh.XLRDError:
+            print(filename2)
+            print("读取excel错误")
+            return "读取excel错误"
+        Sheet_list = workbook1.sheet_names()
+        for h in Sheet_list:
+            if '行政处罚信息' in h:
+                table1 = workbook1.sheet_by_name(h)
+                nrow1 = table1.nrows
+                ncol1 = table1.ncols
+                if nrow1 == 0:
+                    continue
+                else:
+                    column_row = 0
+                    for i in range(nrow1):
+                        data_value = table1.cell_value(i, 0)
+                        if r"法人及其他组织名称" in data_value:
+                            column_row = i
+                            break
+                    length = nrow1 - column_row
+                    for j in range(1, length):
+                        data_dict = {'采集批次': other_data_list[0], 'URL': other_data_list[1],
+                                     '公示表日期': other_data_list[2], '省份': other_data_list[3],
+                                     '分支机构': other_data_list[4], '序号':'', '被处罚人':'',
+                                     '行政处罚决定书文号':'', '违法行为类型':'', '行政处罚决定':'',
+                                    '行政处罚机关':'', '行政处罚日期':'','备注':''
+                                     }
+                        for k in range(ncol1):
+                            if r"法人及其他组织名称" in table1.cell_value(column_row, k):
+                                data_dict['被处罚人'] = table1.cell_value(column_row + j, k)
+                            elif r"行政处罚决定书文号" in table1.cell_value(column_row, k):
+                                data_dict['行政处罚决定书文号'] = table1.cell_value(column_row + j, k)
+                            elif r"违法事实" in table1.cell_value(column_row, k):
+                                data_dict['违法行为类型'] = table1.cell_value(column_row + j, k)
+                            elif r"处罚内容" in table1.cell_value(column_row, k):
+                                data_dict['行政处罚决定'] = table1.cell_value(column_row + j, k)
+                            elif table1.cell_value(column_row, k) == r"处罚机关":
+                                data_dict['行政处罚机关'] = table1.cell_value(column_row + j, k)
+                            elif r"处罚决定日期" in table1.cell_value(column_row, k):
+                                if table1.cell(column_row + j, k).ctype == 3:
+                                    date_value = xlrd.xldate_as_tuple(table1.cell_value(column_row + j, k),
+                                                                      workbook1.datemode)
+                                    date_tmp = date(*date_value[:3]).strftime("%Y/%m/%d")
+                                    value1 = date_tmp
+                                else:
+                                    value1 = table1.cell_value(column_row + j, k)
+                                data_dict['行政处罚日期'] = value1
+                        data_dict['备注'] = ""
+                        configure.F_excel_data_DF.loc[configure.F_excel_data_index] = list(data_dict.values())
+                        configure.F_excel_data_index += 1
+
+class Read_docx(object):
+    def docx_case1(self, docx_path, other_data_list):
+        try:
+            doc = docx.Document(docx_path)
+            ps = [table for table in doc.tables]
+            for j in ps:
+                for p in j.rows[1:]:
+                    row_table = [m.text for m in p.cells]
+                    if len(row_table) == 7:
+                        data_list = []
+                        data_list.extend(other_data_list)
+                        if len(row_table[1]) == 0:
+                            break
+                        else:
+                            for i1 in row_table:
+                                data_list.append(i1)
+                            data_list.append(" ")
+                            configure.F_docx_data_DF.loc[configure.F_docx_data_index] = data_list
+                            configure.F_docx_data_index += 1
+                    if len(row_table) == 8:
+                        data_list = []
+                        data_list.extend(other_data_list)
+                        if len(row_table[1]) == 0:
+                            break
+                        else:
+                            for i1 in row_table:
+                                data_list.append(i1)
+                            configure.F_docx_data_DF.loc[configure.F_docx_data_index] = data_list
+                            configure.F_docx_data_index += 1
+                    elif len(row_table) == 9:
+                        data_list = []
+                        data_list.extend(other_data_list)
+                        if len(row_table[1]) == 0:
+                            break
+                        else:
+                            for i1 in row_table[:8]:
+                                data_list.append(i1)
+                            configure.F_docx_data_DF.loc[configure.F_docx_data_index] = data_list
+                            configure.F_docx_data_index += 1
+                    elif len(row_table) in [0,2,6]:
+                        continue
+                    else:
+                        print("有其他格式的word")
+                        continue
+        except:
+            print("无法打开下载文件" + docx_path)
+
+    def docx_case2(self, docx_path, other_data_list):
+        return

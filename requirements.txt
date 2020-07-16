@@ -1,0 +1,11 @@
+xlutils3==1.0.2
+requests_ntlm==1.1.0
+python_docx==0.8.6
+xlrd==1.1.0
+selenium==3.14.1
+urllib3==1.21.1 
+requests==2.18.4
+pandas==0.23.4
+pyodbc==4.0.17
+beautifulsoup4==4.7.1
+docx==0.2.4

@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# 使用Firfox
+from datetime import datetime
+from selenium.webdriver import Remote
+from selenium.webdriver import Firefox
+from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.support import expected_conditions as expected
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.select import Select
+import time
+
+# 使用Chrome
+# from selenium import webdriver
+# from selenium.webdriver.support.ui import WebDriverWait
+# from selenium.webdriver.support import expected_conditions as expected
+# from selenium.webdriver.common.by import By
+
+from requests_ntlm import HttpNtlmAuth
+from bs4 import BeautifulSoup
+import time
+import os
+import requests
+
+from PBOC_configure import Configure
+configure = Configure()
+
+header = {
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36',
+    'cookie':"wzws_cid=c552c1d30792a46aa75ac1f23def604b6111a0a78072f5bc622f9a13b255333195e6e3475dff225f9f49f35835896b2d78be8149b18131ba8b239e7491a3c49d6762663d3fa25ba9b814935ef9dd570e",
+    'referer':'http://chengdu.pbc.gov.cn/chengdu/129320/129341/129350/4014383/index.html'
+    #'connection':'close'
+}
+
+
+# def get_driver():
+#     profile = FirefoxProfile()
+#     profile.set_preference("network.proxy.type", 1) ###必须配置这个type.参数默认为0，就是直接连接，1是手工配置代理
+#     profile.set_preference("network.proxy.http", "CNCKGTMG01.atrapa.deloitte.com")
+#     profile.set_preference("network.proxy.http", "10.173.23.139")
+#     profile.set_preference("network.proxy.http_port", 3128)
+#     profile.set_preference("network.proxy.ssl", "10.173.23.139")###为https准备的配置
+#     profile.set_preference("network.proxy.ssl_port", 3128)
+#     profile.set_preference("network.proxy.socks_username", "ATRAPA\azhuo")
+#     options = Options()
+#     driver = Firefox(
+#         executable_path=r'geckodriver.exe',
+#         firefox_options=options,
+#         firefox_profile=profile)
+#     return driver
+
+from selenium import webdriver
+
+def get_driver():
+    prefs = {'profile.default_content_settings.popups': 0, 'download.default_directory': 'C:\\Users\\azhuo\\Desktop\\yihangsanhui\\PBOC_data\\download'}
+    chromeOptions = webdriver.ChromeOptions()
+    chromeOptions.add_experimental_option('prefs',prefs)
+    chromeOptions.add_argument("--proxy-server=http://10.173.23.139:3128")
+    browser = webdriver.Chrome(executable_path="chromedriver.exe",chrome_options=chromeOptions)
+    return browser
+
+class crawling(object):
+    def __init__(self):
+        self.driver = get_driver()
+        self.wait = WebDriverWait(self.driver,timeout=30)
+        self.proxy = '10.173.23.139'
+        self.port = 3128
+        self.username = r'xxx'
+        self.password = 'xxx'
+        self.proxies = {'http': '{0}:{1}'.format(self.proxy, self.port), 'https': '{0}:{1}'.format(self.proxy, self.port)}
+    # def __init__(self):
+    #     options = webdriver.ChromeOptions()
+    #     self.driver = webdriver.Chrome(chrome_options=options, executable_path="chromedriver")
+    #     self.wait = WebDriverWait(self.driver, 10)
+    #     self.proxy = '10.173.23.139'
+    #     self.port = 3128
+    #     self.username = r'atrapa\shirlrwang'
+    #     self.password = '98!!!Alone'
+    #     self.proxies = {'http': '{0}:{1}'.format(self.proxy, self.port), 'https': '{0}:{1}'.format(self.proxy, self.port)}
+
+    ####============作用：处理herf链接，拼成完整的url
+    def concat_url(self,url,href):
+        url1 = url.split('http://')[1]
+        url1 = url1.split("/")[0]
+        get_url = 'http://' + url1 + href
+        return get_url
+
+    ####=============作用：判断是否具有下一页
+    def has_next_page(self,method_6,label_6):
+        if method_6 == 'By.CSS_SELECTOR':
+           if self.driver.find_elements(By.CSS_SELECTOR,label_6)[-2].text ==  '下一页':
+               try:
+                   self.driver.find_elements(By.CSS_SELECTOR,label_6)[-2].click()
+                   self.driver.switch_to.window(self.driver.window_handles[len(self.driver.window_handles) - 1])
+                   time.sleep(3)
+                   return True
+               except:
+                   return True
+           else:
+               return False
+        if method_6 == 'By.XPATH':
+            if self.driver.find_elements(By.XPATH, label_6)[-2].text == '下一页':
+                try:
+                    self.driver.find_elements(By.CSS_SELECTOR, label_6)[-2].click()
+                    self.driver.switch_to.window(self.driver.window_handles[len(self.driver.window_handles) - 1])
+                    time.sleep(3)
+                    return True
+                except:
+                    return True
+            else:
+                return False
+
+    ####=============打开网页，并等待网页数据出现
+    def crawlerhandler(self,url,method_1,label_1):
+        retry = 0
+        while retry <= 3:
+            try:
+                self.driver.get(url)
+                break
+            except:
+                retry += 1
+        time.sleep(3)
+        try:
+            self.driver.find_element(By.CLASS_NAME,'content_right')
+        except:
+            self.driver.refresh()
+        #time.sleep(3)
+        # while(True):
+        #
+        #     if method_1 == 'By.ID':
+        #         try:
+        #             self.wait.until(expected.visibility_of_element_located((By.ID,label_1)))
+        #             break
+        #         except:
+        #             self.driver.refresh()
+        #             time.sleep(3)
+        #     if method_1 == 'By.CLASS_NAME':
+        #         try:
+        #            self.wait.until(expected.visibility_of_element_located((By.CLASS_NAME, label_1)))
+        #            break
+        #         except:
+        #             self.driver.refresh()
+        #             time.sleep(3)
+
+
+        # if method_1 == 'By.ID':
+        #     self.wait.until(expected.visibility_of_element_located((By.ID,label_1)))
+        # if method_1 == 'By.CLASS_NAME':
+        #     self.wait.until(expected.visibility_of_element_located((By.CLASS_NAME,label_1)))
+
+    ####=============获取主页上的行政处罚列表
+    def get_link_list(self,method_2,label_2):
+        if method_2 == 'By.CSS_SELECTOR':
+            table_html = self.driver.find_element(By.CSS_SELECTOR,label_2).get_attribute('innerHTML')
+        if method_2 == 'By.XPATH':
+            table_html = self.driver.find_element(By.XPATH, label_2).get_attribute('innerHTML')
+        # self.driver.quit()
+        return table_html
+
+    ####=============判断行政处罚文书是否在爬取的时间区间
+    def link_handler(self,crawling_date,industry,url,table_html,latestd_time,label_3):
+        localTime = time.localtime()
+        strTime = time.strftime("%Y%m%d", localTime)
+        table_soup = BeautifulSoup(table_html,'html.parser')
+        flip_flag = 0
+        if label_3 == 'table':
+            coincident_list = []
+            coincident_date = []
+            table_length  = len(table_soup.find_all('table'))
+            for i in table_soup.find_all('table'):
+                if '-'  in i.get_text() or '20'  in i.get_text():
+                    pubulish_time = i.find_all('td',class_ = 'hei12jj')[-2].get_text()
+                    t1 = pubulish_time.split("-")
+                    t11 = int(t1[0] + t1[1] + t1[2])
+                    if t11 > latestd_time and t11 <= int(strTime) :
+                        href = i.find_all('td',class_ = 'hei12jj')[-3].find('a')['href']
+                        link = self.concat_url(url,href)
+                        coincident_list.append(link)
+                        coincident_date.append(pubulish_time)
+                    else:
+                        break
+                else:
+                    continue
+            coincident_dict = dict(zip(coincident_list, coincident_date))
+            if len(coincident_list) == table_length:
+                flip_flag = 1
+                return coincident_dict ,flip_flag
+            else:
+
+                return coincident_dict, flip_flag
+
+    ####=============作用：Beautifulsoup来解析链接，用于快速找到下载链接或得到html
+    def soup_function(self,url):
+        # auth = HttpNtlmAuth(self.username, self.password)
+        # try:
+        #     html = requests.post(url,proxies=self.proxies,auth = auth,headers=header)
+        #     #html = requests.post(url,headers=header)
+        # except:
+        #     html = requests.get(url,proxies=self.proxies,auth = auth,headers=header)
+        #     #html = requests.post(url, headers=header)
+        # if html.status_code == 404:
+        #     html = requests.get(url,proxies=self.proxies,auth = auth,headers=header)
+        #     #html = requests.post(url, headers=header)
+        retry = 0
+        while retry <= 3:
+            try:
+                self.driver.get(url)
+                break
+            except:
+                retry += 1
+        time.sleep(3)
+        html = self.driver.page_source
+        # html.encoding = 'utf-8'
+        # html = html.text
+       # print(html)
+        soup = BeautifulSoup(html, 'html.parser')
+        return soup
+
+    ####=============作用：从满足时间区间条件的链接中获取到下载文件链接或html链接
+    def download_handler(self,coincident_dict,xml_folder,download_folder):
+        crawling_date = xml_folder.split('\\')[-2].split('_html')[0]
+        industry = xml_folder.split('\\')[-1]
+        download_list = []
+        download_date = []
+        time.sleep(5)
+        for key,value in coincident_dict.items():
+            if key == r'http://chengdu.pbc.gov.cn/chengdu/129320/129341/129350/4013509/index.html':
+                break
+            retry = 0
+            while retry <= 3:
+                try:
+                    soup = self.soup_function(key)
+                    text = soup.find_all('td', class_='hei14jj')[0].get_text()
+                    break
+                except:
+                    retry += 1
+
+            if r'.pdf' in text or r'.docx' in text or r'.doc' in text or r'.xls' in text or r'.xlsx' in text or r'.et' in text or r'.wps' in text:
+                for m in soup.find_all('td', class_ = 'hei14jj'):
+                    links = m.find_all('a')
+                    for link in links:
+                        href = link["href"]
+                        download_link = self.concat_url(key,href)
+                        download_list.append(download_link)
+                        download_date.append(value)
+            else:
+                download_list.append(key)
+                download_date.append(value)
+        download_dict = dict(zip(download_list,download_date))
+        for key,value in download_dict.items():
+            configure.url_df.loc[configure.url_index] = [crawling_date, industry, key,value]
+            configure.url_index += 1
+            #auth = HttpNtlmAuth(self.username, self.password)
+            #r = requests.post(key,proxies=self.proxies,auth = auth,headers=header)
+            #r = requests.post(key,headers=header)
+            # self.driver.get(key)
+            # time.sleep(3)
+            # html = self.driver.page_source
+            # print(html)
+            # r = html.encode(encoding="utf-8")
+
+            if r'.html' in key:
+                self.driver.get(key)
+                time.sleep(3)
+                html = self.driver.page_source
+                res = html.encode(encoding="utf-8")
+                filename = key.split('/')[-2] + key.split('/')[-1]
+                tobecheckdir4 = os.path.exists(xml_folder + '/' + filename)
+                if tobecheckdir4 == False:
+                    with open(xml_folder + '/' + filename,'wb') as f:
+                        f.write(res)
+            else:
+                retry = 0
+                while retry <= 3:
+                    try:
+                        self.driver.get(key)
+                        break
+                    except:
+                        retry += 1
+
+
+            # if r'.html' in key:
+            #     filename = key.split('/')[-2] + key.split('/')[-1]
+            #     tobecheckdir4 = os.path.exists(xml_folder + '/' + filename)
+            #     if tobecheckdir4 == False:
+            #         with open(xml_folder + '/' + filename,'wb') as f:
+            #             f.write(r.content)
+            # else:
+            #     filename = key.split('/')[-1]
+            #     tobecheckdir5 = os.path.exists(download_folder + '/' + filename)
+            #     if tobecheckdir5 == False:
+            #         with open(download_folder + '/' + filename,'wb') as f:
+            #             f.write(r.content)
+        # for i in download_list:
+        #     print(i)
+        #     auth = HttpNtlmAuth(self.username, self.password)
+        #     r = requests.post(i,proxies=self.proxies,auth = auth,headers=header)
+        #
+        #     #print(r.content)
+        #     #r = requests.post(i,headers=header)
+        #     # self.driver.get(i)
+        #     # time.sleep(3)
+        #     # html = self.driver.page_source
+        #     # r = html.encode(encoding="utf-8")
+        #     if r'.html' in i:
+        #         filename = i.split('/')[-2] + i.split('/')[-1]
+        #         tobecheckdir4 = os.path.exists(xml_folder + '/' + filename)
+        #         if tobecheckdir4 == False:
+        #             with open(xml_folder + '/' + filename,'wb') as f:
+        #                 f.write(r.content)
+        #     else:
+        #         filename = i.split('/')[-1]
+        #         tobecheckdir5 = os.path.exists(download_folder + '/' + filename)
+        #         if tobecheckdir5 == False:
+        #             with open(download_folder + '/' + filename,'wb') as f:
+        #                 f.write(r.content)
+        return download_list
+
+    def Crawler(self,Latesed_time,xml_folder,download_folder,method_1,label_1,method_2,label_2,label_3,label_4,method_6,label_6):
+        download_link = []
+        while True:
+            if method_1 == 'By.XPATH':
+                elements = self.driver.find_elements(By.XPATH,label_1)
+                scroll_flag = 0
+                for item in elements:
+                    link,scroll_flag = self.get_coincident_url(item,method_2,label_2,label_3,label_4,Latesed_time,scroll_flag)
+                    if link == 'no more pages':
+                        break
+                    else:
+                        download_link.append(link)
+                    handels = self.driver.window_handles
+                    self.driver.close()
+                    self.driver.switch_to.window(handels[0])
+                    ####===需要go to end 让主页上剩下的链接剋但
+                    if scroll_flag == 6:
+                        self.driver.find_element_by_tag_name("body").send_keys(Keys.END)
+                        time.sleep(3)
+                flag = self.has_next_page(method_6,label_6)
+                if flag == False:
+                    print('No next page')
+                    self.driver.close()
+                    break
+        if len(download_link) == 0:
+            return 'No Updated'
+        else:
+            self.download_file(download_folder,xml_folder,download_link)
+            return 'Updated Num:' + str(len(download_link))
+
+if __name__ == '__main__':
+    crawler = crawling()
+
+
+
